@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Puts "Send to Mac" in the share sheet's top (direct share) row, next to chats. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="com.harshkit.phonebridge.SendActivity">
+        <data android:mimeType="image/*" />
+        <data android:mimeType="text/plain" />
+        <category android:name="com.harshkit.phonebridge.SEND_TO_MAC" />
+    </share-target>
+</shortcuts>

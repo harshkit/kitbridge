@@ -239,7 +239,7 @@ object Link {
     private fun handle(j: JSONObject) {
         when (j.optString("t")) {
             "pong" -> { rttMs = (System.nanoTime() - j.getLong("ts")) / 1_000_000; return }
-            "hello" -> { macName = j.optString("name"); return }
+            "hello" -> { macName = j.optString("name"); publishShareShortcut(ctx); return }
             "reply" -> {
                 val ok = Replies.send(ctx, j.getString("id"), j.getString("text"))
                 send(JSONObject().put("t", "replied").put("id", j.getString("id")).put("ok", ok))
@@ -276,6 +276,7 @@ class BridgeService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         instance = this
+        publishShareShortcut(this)
         Link.start(this)
         ClipWatch.start(this)
     }
@@ -501,6 +502,19 @@ class ClipActivity : Activity() {
         finish()
         @Suppress("DEPRECATION") overridePendingTransition(0, 0)
     }
+}
+
+/** The "Send to Mac" direct-share shortcut (top row of the share sheet), named after your paired Mac. */
+fun publishShareShortcut(c: Context) = runCatching {
+    val sm = c.getSystemService(android.content.pm.ShortcutManager::class.java)
+    val name = Link.macName.ifEmpty { "Mac" }
+    sm.pushDynamicShortcut(android.content.pm.ShortcutInfo.Builder(c, "send_to_mac")
+        .setShortLabel("Send to $name".take(25)).setLongLabel("Send to $name")
+        .setIcon(android.graphics.drawable.Icon.createWithResource(c, R.mipmap.ic_launcher))
+        .setCategories(setOf("com.harshkit.phonebridge.SEND_TO_MAC"))
+        .setLongLived(true)
+        .setIntent(Intent(c, SendActivity::class.java).setAction(Intent.ACTION_SEND))
+        .build())
 }
 
 /** "Turn on copy to Mac" — shown only while Android hasn't granted the log access the clipboard watcher needs. */
