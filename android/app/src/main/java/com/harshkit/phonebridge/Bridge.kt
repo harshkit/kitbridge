@@ -421,10 +421,7 @@ object ClipWatch {
                         if (line.contains(app.packageName) && probeSkip > 0 && System.currentTimeMillis() < probeUntil) {
                             probeSkip = 0; return@forEachLine // exactly one line: our own self-test, never a copy
                         }
-                        if (line.contains(app.packageName) && Link.on("clip_out")) {
-                            app.startActivity(Intent(app, ClipActivity::class.java)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))
-                        }
+                        if (line.contains(app.packageName)) trigger(app)
                     }
                 }
                 // A logcat that lived a while (or was restarted on purpose) comes back fast; one that keeps dying backs off to 30 s.
@@ -440,6 +437,21 @@ object ClipWatch {
      * Allow). One started in the background after an update or reboot is silently blind, so the app
      * calls this from its screen until a real clipboard line has been seen.
      */
+    @Volatile private var lastTrigger = 0L
+    /** A copy was detected (by Accessibility or the log watcher): read it once, however many detectors fired. */
+    fun trigger(c: Context) {
+        val now = System.currentTimeMillis()
+        if (!Link.on("clip_out") || now - lastTrigger < 1500) return
+        lastTrigger = now
+        Handler(Looper.getMainLooper()).postDelayed({  // let the copying app finish writing the clipboard
+            c.applicationContext.startActivity(Intent(c, ClipActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))
+        }, 250)
+    }
+
+    fun a11yOn(c: Context) = Settings.Secure.getString(c.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+        .orEmpty().contains("${c.packageName}/") 
+
     fun restartIfBlind() { if (!healthy) { restartNow = true; proc?.destroy() } }
 
     /**
@@ -450,6 +462,7 @@ object ClipWatch {
     fun probe(delayMs: Long) = thread {
         Thread.sleep(delayMs)
         if (onScreen || !::appCtx.isInitialized) return@thread
+        if (a11yOn(appCtx)) { BlindNotice.hide(appCtx); return@thread } // copies are detected without log access
         healthy = false
         probeSkip = 1
         probeUntil = System.currentTimeMillis() + 3000
@@ -527,6 +540,32 @@ fun publishShareShortcut(c: Context) = runCatching {
         .setLongLived(true)
         .setIntent(Intent(c, SendActivity::class.java).setAction(Intent.ACTION_SEND))
         .build())
+}
+
+/**
+ * Copy detector that survives reboots and updates. Narrow on purpose: it only receives taps, pop-ups
+ * and window changes (no window content), and only acts on a "Copy" button, a "Copied" pop-up or the
+ * system clipboard pop-up. It never reads the clipboard itself; ClipActivity does that.
+ */
+class CopyWatcher : android.accessibilityservice.AccessibilityService() {
+    private val copyButton = Regex("^(copy|copy (link|text|image|address|url|to clipboard))$", RegexOption.IGNORE_CASE)
+
+    override fun onServiceConnected() { BlindNotice.hide(this) }
+
+    override fun onAccessibilityEvent(e: android.view.accessibility.AccessibilityEvent) {
+        val label = (e.text.joinToString(" ") + " " + (e.contentDescription ?: "")).trim()
+        val cls = e.className?.toString().orEmpty()
+        val copied = when (e.eventType) {
+            android.view.accessibility.AccessibilityEvent.TYPE_VIEW_CLICKED -> copyButton.matches(label)
+            else -> label.contains("copied", ignoreCase = true) || cls.contains("clipboard", ignoreCase = true)
+        }
+        if (copied) {
+            android.util.Log.i("PhoneBridge", "Copy detected (${e.packageName}, type ${e.eventType})")
+            ClipWatch.trigger(this)
+        }
+    }
+
+    override fun onInterrupt() {}
 }
 
 /** "Turn on copy to Mac" — shown only while Android hasn't granted the log access the clipboard watcher needs. */

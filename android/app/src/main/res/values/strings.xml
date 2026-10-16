@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="copy_watcher_desc">Lets PhoneBridge notice when you tap Copy, so what you copied can go to your Mac. It only watches for Copy buttons and \"Copied\" pop-ups and can\'t read anything else on your screen.</string>
+</resources>
