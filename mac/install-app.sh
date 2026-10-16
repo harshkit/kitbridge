@@ -19,5 +19,7 @@ cat > "$LA" <<AGENT
   <key>ProcessType</key><string>Interactive</string>
 </dict></plist>
 AGENT
+# Tell macOS about the app (and its icon); launchd-started apps otherwise show a blank icon on alerts.
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/PhoneBridge.app
 launchctl bootstrap "gui/$(id -u)" "$LA"
 echo "PhoneBridge for Mac installed and running (menu bar)."

@@ -238,6 +238,12 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
             content.sound = .default
             if j["cat"] as? String == "call" { content.interruptionLevel = .timeSensitive }
             if j["reply"] as? Bool == true { content.categoryIdentifier = "reply"; content.userInfo = ["id": id] }
+            content.threadIdentifier = j["pkg"] as? String ?? app // group alerts per app, like the phone does
+            // The phone draws the picture: sender's photo with the app badge, or the app's icon.
+            if let b = j["photo"] as? String, let d = Data(base64Encoded: b) {
+                let f = FileManager.default.temporaryDirectory.appendingPathComponent("pb-\(UUID().uuidString).png")
+                if (try? d.write(to: f)) != nil, let a = try? UNNotificationAttachment(identifier: "photo", url: f) { content.attachments = [a] }
+            }
             if let code = findCode(title + " " + text) {
                 setClip(code)
                 pb.setString("", forType: .init("org.nspasteboard.TransientType")) // clipboard managers: don't keep codes in history

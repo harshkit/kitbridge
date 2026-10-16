@@ -170,7 +170,7 @@ object Link {
             s.tcpNoDelay = true
             s.keepAlive = true
             s.connect(InetSocketAddress(host, port), 2000)
-            s.soTimeout = 90_000 // Mac pings every 30s; silence means the link is dead
+            s.soTimeout = 25_000 // we ping every 10 s and the Mac answers; 25 s of silence means the link is dead
             sock = s
             val i = DataInputStream(BufferedInputStream(s.getInputStream()))
             val o = DataOutputStream(BufferedOutputStream(s.getOutputStream()))
@@ -191,6 +191,7 @@ object Link {
 
             sendQ.submit { tx = 0; session = SecretKeySpec(sk, "AES"); out = o }.get()
             send(JSONObject().put("t", "hello").put("name", Build.MODEL))
+            thread { BridgeService.instance?.resync() } // catch up on anything posted while disconnected
             prefs.edit().putString("host", host).putInt("port", port).apply()
             status = "Connected to Mac ($host)"
             while (true) {
@@ -268,34 +269,78 @@ object Link {
 
 /** Kept alive by Android itself while notification access is granted — this is our always-on process. */
 class BridgeService : NotificationListenerService() {
+    companion object {
+        @Volatile var instance: BridgeService? = null
+        fun replyAction(n: Notification) = n.actions?.firstOrNull { a -> a.remoteInputs?.any { it.allowFreeFormInput } == true }
+    }
+
     override fun onListenerConnected() {
+        instance = this
         Link.start(this)
         ClipWatch.start(this)
     }
 
-    override fun onNotificationPosted(sbn: StatusBarNotification) {
+    override fun onListenerDisconnected() { instance = null }
+
+    override fun onNotificationPosted(sbn: StatusBarNotification) = forward(sbn, live = true)
+
+    /** After every (re)connect: re-send what's still on the phone from the last 10 minutes. The Mac skips
+     *  anything it already showed, so notifications that arrived while the link was down aren't lost. */
+    fun resync() {
+        val since = System.currentTimeMillis() - 10 * 60_000
+        runCatching { activeNotifications }.getOrNull()?.filter { it.postTime > since }?.sortedBy { it.postTime }
+            ?.forEach { runCatching { forward(it, live = false) } }
+    }
+
+    private fun forward(sbn: StatusBarNotification, live: Boolean) {
         val n = sbn.notification
         if (sbn.packageName == packageName || n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
+        val e = n.extras
         val cat = when {
             n.category == Notification.CATEGORY_CALL -> "call"
-            n.category == Notification.CATEGORY_MESSAGE -> "msg"
+            n.category == Notification.CATEGORY_MESSAGE || e.containsKey(Notification.EXTRA_MESSAGES) -> "msg" // WhatsApp chats
             else -> "app"
         }
         if (sbn.isOngoing && cat != "call") return
-        if (Replies.justReplied(sbn.key)) return // the app re-posts the thread with your own reply in it
+        if (live && Replies.justReplied(sbn.key)) return // the app re-posts the thread with your own reply in it
         if (!Link.on(mapOf("call" to "calls", "msg" to "msgs", "app" to "apps").getValue(cat))) return
-        val e = n.extras
         val title = e.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
         val text = (e.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: e.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
         if (title.isEmpty() && text.isEmpty()) return
-        val app = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() }
-            .getOrDefault(sbn.packageName)
-        Link.bump(cat.let { if (it == "call") "calls" else if (it == "msg") "msgs" else "apps" })
-        android.util.Log.i("PhoneBridge", "Forwarding ${sbn.packageName} ($cat)")
-        val reply = n.actions?.firstOrNull { a -> a.remoteInputs?.any { it.allowFreeFormInput } == true }
+        val pkg = sbn.packageName
+        val app = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
+        if (live) {
+            Link.bump(if (cat == "call") "calls" else if (cat == "msg") "msgs" else "apps")
+            android.util.Log.i("PhoneBridge", "Forwarding $pkg ($cat)")
+        }
+        val reply = replyAction(n)
         if (reply != null) Replies.remember(sbn.key, reply)
-        Link.send(JSONObject().put("t", "notif").put("id", sbn.key).put("app", app)
-            .put("title", title).put("text", text).put("cat", cat).put("reply", reply != null))
+        val j = JSONObject().put("t", "notif").put("id", sbn.key).put("app", app).put("pkg", pkg)
+            .put("title", title).put("text", text).put("cat", cat).put("reply", reply != null)
+        // Picture for the Mac alert, drawn like Android's: the sender's photo in a circle with the app's
+        // icon as a badge, or just the app's icon when there's no photo.
+        runCatching {
+            avatar(n.getLargeIcon()?.loadDrawable(this), packageManager.getApplicationIcon(pkg))
+        }.getOrNull()?.let { j.put("photo", it) }
+        Link.send(j)
+    }
+
+    private fun avatar(photo: android.graphics.drawable.Drawable?, icon: android.graphics.drawable.Drawable, size: Int = 192): String {
+        val b = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(b)
+        if (photo == null) {
+            icon.setBounds(0, 0, size, size); icon.draw(c)
+        } else {
+            val circle = android.graphics.Path().apply { addCircle(size / 2f, size / 2f, size / 2f, android.graphics.Path.Direction.CW) }
+            c.save(); c.clipPath(circle); photo.setBounds(0, 0, size, size); photo.draw(c); c.restore()
+            val bs = (size * 0.42f).toInt(); val x = size - bs; val y = size - bs  // badge, bottom-right
+            val ring = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE }
+            c.drawCircle(x + bs / 2f, y + bs / 2f, bs / 2f + size * 0.025f, ring)
+            c.save(); c.clipPath(android.graphics.Path().apply { addCircle(x + bs / 2f, y + bs / 2f, bs / 2f, android.graphics.Path.Direction.CW) })
+            icon.setBounds(x, y, x + bs, y + bs); icon.draw(c); c.restore()
+        }
+        val out = java.io.ByteArrayOutputStream(); b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+        return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
@@ -490,7 +535,11 @@ object Replies {
     @Synchronized fun justReplied(key: String) = (repliedAt[key] ?: 0) > System.currentTimeMillis() - 4000
 
     fun send(c: Context, key: String, text: String): Boolean {
-        val a = synchronized(this) { actions[key] } ?: return false.also { android.util.Log.w("PhoneBridge", "Reply failed: notification no longer on the phone") }
+        // Remembered action, or (after a restart/update wiped memory) the live notification's own Reply action.
+        val a = synchronized(this) { actions[key] }
+            ?: runCatching { BridgeService.instance?.activeNotifications?.firstOrNull { it.key == key } }.getOrNull()
+                ?.notification?.let(BridgeService::replyAction)
+            ?: return false.also { android.util.Log.w("PhoneBridge", "Reply failed: notification no longer on the phone") }
         return try {
             val inputs = a.remoteInputs
             val results = Bundle().apply { inputs.forEach { putCharSequence(it.resultKey, text) } }
