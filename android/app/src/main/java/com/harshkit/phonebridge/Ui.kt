@@ -231,6 +231,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        ClipWatch.onScreen = true
+        BlindNotice.hide(this)
         ClipWatch.restartIfBlind() // on screen now, so Android can ask "Allow log access?"
         buildPerms()
         tick.post(object : Runnable {
@@ -238,7 +240,11 @@ class MainActivity : Activity() {
         })
     }
 
-    override fun onPause() { super.onPause(); tick.removeCallbacksAndMessages(null) }
+    override fun onPause() {
+        super.onPause(); tick.removeCallbacksAndMessages(null)
+        ClipWatch.onScreen = false
+        ClipWatch.probe(2000) // check, once you've left, whether Android granted log access
+    }
 
     private fun refresh() {
         val listener = Settings.Secure.getString(contentResolver, "enabled_notification_listeners").orEmpty().contains(packageName)

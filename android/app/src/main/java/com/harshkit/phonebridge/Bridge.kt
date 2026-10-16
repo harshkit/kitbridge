@@ -392,10 +392,13 @@ object ClipWatch {
     @Volatile var healthy = false
     @Volatile private var restartNow = false
     @Volatile private var probeUntil = 0L
+    @Volatile var onScreen = false // the app on screen is never denied, so the self-test only means something in the background
+    private lateinit var appCtx: Context
 
     fun start(c: Context) {
         synchronized(this) { if (started) return; started = true }
         val app = c.applicationContext
+        appCtx = app
         val cm = app.getSystemService(ClipboardManager::class.java)
         Handler(Looper.getMainLooper()).post { cm.addPrimaryClipChangedListener {} }
         if (app.checkSelfPermission(Manifest.permission.READ_LOGS) != PackageManager.PERMISSION_GRANTED) return
@@ -407,16 +410,7 @@ object ClipWatch {
                     val since = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
                     val p = Runtime.getRuntime().exec(arrayOf("logcat", "-T", since, "ClipboardService:E", "*:S"))
                     proc = p
-                    // Self-test: read the clipboard from the background so Android logs a denial for us. If this
-                    // watcher doesn't see that line it's blind (no log access): say so on the phone.
-                    thread {
-                        Thread.sleep(1500)
-                        healthy = false
-                        probeUntil = System.currentTimeMillis() + 3000
-                        runCatching { cm.primaryClip }
-                        Thread.sleep(3000)
-                        if (healthy) BlindNotice.hide(app) else BlindNotice.show(app)
-                    }
+                    probe(1500)
                     p.inputStream.bufferedReader().forEachLine { line ->
                         if (line.contains("Denying clipboard access")) healthy = true
                         if (System.currentTimeMillis() < probeUntil) return@forEachLine // our own self-test, not a copy
@@ -440,6 +434,22 @@ object ClipWatch {
      * calls this from its screen until a real clipboard line has been seen.
      */
     fun restartIfBlind() { if (!healthy) { restartNow = true; proc?.destroy() } }
+
+    /**
+     * Self-test: read the clipboard from the background so Android logs a denial for us. If the watcher
+     * doesn't see that line it's blind (no log access), and the phone says so. Skipped while the app is on
+     * screen (it would never be denied there); the app re-runs it a moment after you leave it.
+     */
+    fun probe(delayMs: Long) = thread {
+        Thread.sleep(delayMs)
+        if (onScreen || !::appCtx.isInitialized) return@thread
+        healthy = false
+        probeUntil = System.currentTimeMillis() + 3000
+        runCatching { appCtx.getSystemService(ClipboardManager::class.java).primaryClip }
+        Thread.sleep(3000)
+        if (onScreen) return@thread
+        if (healthy) BlindNotice.hide(appCtx) else BlindNotice.show(appCtx)
+    }
 
 
     /** Manual send (Quick Settings tile, share sheet): an image URI or text, straight to the Mac. */
