@@ -62,7 +62,8 @@ object Link {
         set(v) { if (v != field) android.util.Log.i("PhoneBridge", v); field = v }
     @Volatile private var out: DataOutputStream? = null
     @Volatile private var sock: Socket? = null
-    @Volatile var lastClip: String? = null // echo guard: what the Mac last sent us
+    @Volatile var lastClip: String? = null
+    @Volatile var clipMime = "image/png" // echo guard: what the Mac last sent us
     private val sendQ = Executors.newSingleThreadExecutor()
     private val rnd = SecureRandom()
     private var started = false
@@ -238,6 +239,11 @@ object Link {
         when (j.optString("t")) {
             "pong" -> { rttMs = (System.nanoTime() - j.getLong("ts")) / 1_000_000; return }
             "hello" -> { macName = j.optString("name"); return }
+            "reply" -> {
+                val ok = Replies.send(ctx, j.getString("id"), j.getString("text"))
+                send(JSONObject().put("t", "replied").put("id", j.getString("id")).put("ok", ok))
+                return
+            }
         }
         if (j.optString("t") != "clip" || !on("clip_in")) return
         bump("clip")
@@ -246,7 +252,10 @@ object Link {
             lastClip = j.getString("text")
             ClipData.newPlainText("Mac", lastClip)
         } else {
-            File(ctx.cacheDir, "clip.png").writeBytes(Base64.decode(j.getString("img"), Base64.DEFAULT))
+            val bytes = Base64.decode(j.getString("img"), Base64.DEFAULT)
+            // The Mac sends original PNG or JPEG bytes; label the file with what it really is.
+            clipMime = if (bytes.size > 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte()) "image/jpeg" else "image/png"
+            File(ctx.cacheDir, "clip.png").writeBytes(bytes)
             lastClip = null
             ClipData.newUri(ctx.contentResolver, "Mac image", Uri.parse("content://com.harshkit.phonebridge.img/clip.png?" + System.nanoTime()))
         }
@@ -273,8 +282,7 @@ class BridgeService : NotificationListenerService() {
             else -> "app"
         }
         if (sbn.isOngoing && cat != "call") return
-        // With SMS permission the full SMS comes through SmsReceiver (Android hides OTPs from listeners).
-        if (sbn.packageName == Telephony.Sms.getDefaultSmsPackage(this) && SmsReceiver.granted(this)) return
+        if (Replies.justReplied(sbn.key)) return // the app re-posts the thread with your own reply in it
         if (!Link.on(mapOf("call" to "calls", "msg" to "msgs", "app" to "apps").getValue(cat))) return
         val e = n.extras
         val title = e.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
@@ -283,11 +291,14 @@ class BridgeService : NotificationListenerService() {
         val app = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() }
             .getOrDefault(sbn.packageName)
         Link.bump(cat.let { if (it == "call") "calls" else if (it == "msg") "msgs" else "apps" })
+        val reply = n.actions?.firstOrNull { a -> a.remoteInputs?.any { it.allowFreeFormInput } == true }
+        if (reply != null) Replies.remember(sbn.key, reply)
         Link.send(JSONObject().put("t", "notif").put("id", sbn.key).put("app", app)
-            .put("title", title).put("text", text).put("cat", cat))
+            .put("title", title).put("text", text).put("cat", cat).put("reply", reply != null))
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        Replies.forget(sbn.key)
         Link.send(JSONObject().put("t", "notif_rm").put("id", sbn.key))
     }
 }
@@ -301,10 +312,10 @@ class SmsReceiver : BroadcastReceiver() {
         if (!Link.on("msgs")) return
         val parts = Telephony.Sms.Intents.getMessagesFromIntent(i) ?: return
         if (parts.isEmpty()) return
-        Link.bump("msgs")
-        Link.send(JSONObject().put("t", "notif").put("id", "sms:" + System.currentTimeMillis())
-            .put("app", "Messages").put("title", parts[0].displayOriginatingAddress)
-            .put("text", parts.joinToString("") { it.displayMessageBody }).put("cat", "msg"))
+        // Android 15+ hides OTP text from notification listeners, so the SMS itself is sent for code
+        // detection only. The message is shown on the Mac via the Messages app's notification (which can be replied to).
+        Link.send(JSONObject().put("t", "otp").put("from", parts[0].displayOriginatingAddress)
+            .put("text", parts.joinToString("") { it.displayMessageBody }))
     }
 }
 
@@ -378,11 +389,40 @@ class ClipActivity : Activity() {
 /** Serves the last image the Mac copied, so it can sit on the Android clipboard as a content:// URI. */
 class ImageProvider : ContentProvider() {
     override fun onCreate() = true
-    override fun getType(uri: Uri) = "image/png"
+    override fun getType(uri: Uri) = Link.clipMime
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor =
         ParcelFileDescriptor.open(File(context!!.cacheDir, "clip.png"), ParcelFileDescriptor.MODE_READ_ONLY)
     override fun query(u: Uri, p: Array<String>?, s: String?, a: Array<String>?, o: String?) = null
     override fun insert(u: Uri, v: ContentValues?) = null
     override fun update(u: Uri, v: ContentValues?, s: String?, a: Array<String>?) = 0
     override fun delete(u: Uri, s: String?, a: Array<String>?) = 0
+}
+
+/**
+ * Reply from the Mac. Apps like WhatsApp and Messages put a "Reply" action with a text field
+ * (RemoteInput) on their notifications; we keep it and, when the Mac sends text, fire it exactly
+ * as the notification shade would.
+ */
+object Replies {
+    private val actions = object : LinkedHashMap<String, Notification.Action>() {
+        override fun removeEldestEntry(e: MutableMap.MutableEntry<String, Notification.Action>) = size > 200
+    }
+    private val repliedAt = HashMap<String, Long>()
+
+    @Synchronized fun remember(key: String, a: Notification.Action) { actions[key] = a }
+    @Synchronized fun forget(key: String) { actions.remove(key) }
+    @Synchronized fun justReplied(key: String) = (repliedAt[key] ?: 0) > System.currentTimeMillis() - 4000
+
+    fun send(c: Context, key: String, text: String): Boolean {
+        val a = synchronized(this) { actions[key] } ?: return false
+        return try {
+            val inputs = a.remoteInputs
+            val results = Bundle().apply { inputs.forEach { putCharSequence(it.resultKey, text) } }
+            val fill = Intent()
+            android.app.RemoteInput.addResultsToIntent(inputs, fill, results)
+            synchronized(this) { repliedAt[key] = System.currentTimeMillis() }
+            a.actionIntent.send(c, 0, fill)
+            true
+        } catch (e: Exception) { false }
+    }
 }

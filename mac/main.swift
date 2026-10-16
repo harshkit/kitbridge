@@ -1,4 +1,6 @@
 import AppKit
+import ImageIO
+import UniformTypeIdentifiers
 import CryptoKit
 import Network
 import UserNotifications
@@ -19,6 +21,22 @@ func loadKeyHex() -> String {
 // A notification is treated as an OTP only if it also mentions a code-ish word.
 let otpHint = try! NSRegularExpression(pattern: "otp|code|verif|password|passcode|pin|one.?time|2fa|login|sign.?in|कोड", options: .caseInsensitive)
 let otpCode = try! NSRegularExpression(pattern: "(?<![\\d₹$])(?<!\\d[.,])(\\d{3}[- ]?\\d{3}|\\d{4,8})(?!\\d|[.,]\\d)")
+
+/// Any image (HEIC/JPEG/PNG/TIFF, HDR or not) → an upright, standard-range PNG that keeps its colour profile.
+/// HDR photos (e.g. Samsung/iPhone HEIC with a gain map) otherwise become 16-bit PQ images that most apps show washed out.
+func sdrPNG(_ d: Data) -> Data? {
+    guard let src = CGImageSourceCreateWithData(d as CFData, nil),
+          let p = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] else { return nil }
+    let side = max(p[kCGImagePropertyPixelWidth] as? Int ?? 0, p[kCGImagePropertyPixelHeight] as? Int ?? 0)
+    let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                 kCGImageSourceCreateThumbnailWithTransform: true, // apply EXIF rotation
+                                 kCGImageSourceThumbnailMaxPixelSize: side]        // full size, no downscale
+    guard side > 0, let img = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+    let out = NSMutableData()
+    guard let dst = CGImageDestinationCreateWithData(out, UTType.png.identifier as CFString, 1, nil) else { return nil }
+    CGImageDestinationAddImage(dst, img, nil)
+    return CGImageDestinationFinalize(dst) ? out as Data : nil
+}
 
 func findCode(_ s: String) -> String? {
     let r = NSRange(s.startIndex..., in: s)
@@ -49,6 +67,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     var pending = [Session]() // strangers still inside their 5-second handshake window, oldest first
     var conn: Session? // the live phone; set only once it has sent a valid session frame
     var phone = ""
+    var alertsOff = false // macOS notifications for PhoneBridge are turned off
     var seen = [String: String]()
     let pb = NSPasteboard.general
     lazy var lastChange = pb.changeCount
@@ -58,7 +77,11 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        // "Reply" text field on message notifications that the phone says can be answered.
+        let reply = UNTextInputNotificationAction(identifier: "REPLY", title: "Reply", options: [],
+                                                  textInputButtonTitle: "Send", textInputPlaceholder: "Message")
+        center.setNotificationCategories([UNNotificationCategory(identifier: "reply", actions: [reply], intentIdentifiers: [], options: [])])
+        center.requestAuthorization(options: [.alert, .sound]) { [weak self] _, _ in self?.checkAlerts() }
 
         let p = NWParameters.tcp
         (p.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options)?.noDelay = true
@@ -88,6 +111,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
                                      accessibilityDescription: "PhoneBridge")
         let m = NSMenu()
         m.addItem(withTitle: conn == nil ? "Waiting for phone…" : "Connected: \(phone)", action: nil, keyEquivalent: "")
+        if alertsOff { m.addItem(withTitle: "⚠ Turn on notifications…", action: #selector(openAlertSettings), keyEquivalent: "") }
         m.addItem(.separator())
         let clip = m.addItem(withTitle: "Share clipboard with phone", action: #selector(toggleClip), keyEquivalent: "")
         clip.state = syncClipboard ? .on : .off
@@ -96,6 +120,15 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         m.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         m.items.forEach { if $0.action != #selector(NSApplication.terminate(_:)) { $0.target = self } }
         item.menu = m
+    }
+
+    func checkAlerts() {
+        UNUserNotificationCenter.current().getNotificationSettings { s in
+            DispatchQueue.main.async { [self] in alertsOff = s.authorizationStatus != .authorized; refresh() }
+        }
+    }
+    @objc func openAlertSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
     }
 
     @objc func toggleClip() { syncClipboard.toggle(); UserDefaults.standard.set(syncClipboard, forKey: "clip"); refresh() }
@@ -189,6 +222,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
             content.body = text
             content.sound = .default
             if j["cat"] as? String == "call" { content.interruptionLevel = .timeSensitive }
+            if j["reply"] as? Bool == true { content.categoryIdentifier = "reply"; content.userInfo = ["id": id] }
             if let code = findCode(title + " " + text) {
                 setClip(code)
                 pb.setString("", forType: .init("org.nspasteboard.TransientType")) // clipboard managers: don't keep codes in history
@@ -196,6 +230,24 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
                 content.subtitle = "Code \(code) copied — press ⌘V"
             }
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+        case "otp": // full SMS text, sent only so codes Android hides from listeners can still be copied
+            let text = j["text"] as? String ?? ""
+            guard let code = findCode(text) else { return }
+            setClip(code)
+            pb.setString("", forType: .init("org.nspasteboard.TransientType"))
+            lastChange = pb.changeCount
+            let content = UNMutableNotificationContent()
+            content.title = "Code \(code) copied — press ⌘V"
+            content.subtitle = j["from"] as? String ?? ""
+            content.body = text
+            content.sound = .default
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "otp-\(code)", content: content, trigger: nil))
+        case "replied":
+            guard j["ok"] as? Bool != true else { return } // success is silent, like Messages on a Mac
+            let content = UNMutableNotificationContent()
+            content.title = "Couldn't send your reply"
+            content.body = "Open the app on your phone to reply."
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         case "notif_rm":
             guard let id = j["id"] as? String else { return }
             seen[id] = nil
@@ -203,8 +255,12 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         case "clip":
             guard syncClipboard else { return }
             if let t = j["text"] as? String { setClip(t) }
-            else if let b = j["img"] as? String, let d = Data(base64Encoded: b), let img = NSImage(data: d) {
-                pb.clearContents(); pb.writeObjects([img]); lastChange = pb.changeCount
+            else if let b = j["img"] as? String, let d = Data(base64Encoded: b), let png = sdrPNG(d) {
+                let item = NSPasteboardItem()
+                item.setData(png, forType: .png) // what most apps paste: true colours, upright
+                if let src = CGImageSourceCreateWithData(d as CFData, nil), let t = CGImageSourceGetType(src) as String?,
+                   t != UTType.png.identifier { item.setData(d, forType: .init(t)) } // untouched original (keeps HDR) for apps that want it
+                pb.clearContents(); pb.writeObjects([item]); lastChange = pb.changeCount
             }
         default: break
         }
@@ -225,10 +281,29 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         if types.contains(where: { ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"].contains($0.rawValue) }) { return }
         if let s = pb.string(forType: .string) {
             send(["t": "clip", "text": s])
-        } else if let img = NSImage(pasteboard: pb), let tiff = img.tiffRepresentation,
-                  let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]), png.count < 20_000_000 {
-            send(["t": "clip", "img": png.base64EncodedString()])
+        } else if let d = pb.data(forType: .png) ?? pb.data(forType: .init(UTType.jpeg.identifier))
+                    ?? pb.data(forType: .init(UTType.heic.identifier)).flatMap(sdrPNG)
+                    ?? pb.data(forType: .tiff).flatMap(sdrPNG), d.count < 20_000_000 {
+            // The original PNG/JPEG bytes when the clipboard has them (no re-encode); otherwise a standard-range PNG.
+            send(["t": "clip", "img": d.base64EncodedString()])
         }
+    }
+
+    func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse,
+                                withCompletionHandler done: @escaping () -> Void) {
+        if let t = r as? UNTextInputNotificationResponse, let id = t.notification.request.content.userInfo["id"] as? String,
+           !t.userText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            DispatchQueue.main.async { [self] in
+                guard conn != nil else {
+                    let content = UNMutableNotificationContent()
+                    content.title = "Your reply wasn't sent"
+                    content.body = "Your phone isn't connected right now."
+                    return UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+                }
+                send(["t": "reply", "id": id, "text": t.userText])
+            }
+        }
+        done()
     }
 
     func userNotificationCenter(_ c: UNUserNotificationCenter, willPresent n: UNNotification,

@@ -53,6 +53,36 @@ func waitClip(_ s: String) -> Int { let t = Date()
     while pb.string(forType: .string) != s { precondition(Date().timeIntervalSince(t) < 2, "clipboard never became \(s)"); usleep(2000) }
     return Int(Date().timeIntervalSince(t) * 1000) }
 
+// Manual mode: `fakephone <key> <port> reply` posts a message with a Reply button and waits for your answer.
+if a.count > 3 && a[3] == "reply" {
+    let r = Conn(); precondition(r.handshake())
+    r.send(["t": "hello", "name": "Fake S26"])
+    r.send(["t": "notif", "id": "reply-\(UUID().uuidString.prefix(6))", "app": "WhatsApp", "title": "PhoneBridge test",
+            "text": "Reply to this from your Mac 👋", "cat": "msg", "reply": true])
+    print("Posted. Reply from the Mac notification… (10 min)")
+    var tv = timeval(tv_sec: 600, tv_usec: 0); setsockopt(r.fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    while let m = r.recv() {
+        if m["t"] as? String == "reply" { print("✓ Mac sent reply:", m["text"] ?? "", "for", m["id"] ?? ""); r.send(["t": "replied", "id": m["id"] ?? "", "ok": true]); exit(0) }
+    }
+    print("✗ no reply received"); exit(1)
+}
+
+// `fakephone <key> <port> img <file>`: send a photo as if copied on the phone, report what the Mac clipboard holds.
+if a.count > 4 && a[3] == "img" {
+    let r = Conn(); precondition(r.handshake())
+    r.send(["t": "hello", "name": "Fake S26"])
+    let photo = try! Data(contentsOf: URL(fileURLWithPath: a[4]))
+    let before = NSPasteboard.general.changeCount
+    r.send(["t": "clip", "img": photo.base64EncodedString()])
+    let t = Date(); while NSPasteboard.general.changeCount == before { precondition(Date().timeIntervalSince(t) < 10, "image never arrived"); usleep(5000) }
+    let ms = Int(Date().timeIntervalSince(t) * 1000)
+    let types = NSPasteboard.general.types ?? []
+    let png = NSPasteboard.general.data(forType: .png)!
+    try! png.write(to: URL(fileURLWithPath: "/tmp/pb-pasted.png"))
+    print("arrived in \(ms) ms; clipboard types:", types.map(\.rawValue), "png bytes:", png.count)
+    exit(0)
+}
+
 let c = Conn(); precondition(c.handshake(), "handshake failed")
 print("✓ X25519 handshake, fresh session key")
 c.send(["t": "hello", "name": "Fake S26"])
