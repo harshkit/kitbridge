@@ -390,6 +390,8 @@ object ClipWatch {
     @Volatile private var proc: Process? = null
     /** True once we've seen any system ClipboardService line, i.e. Android granted log access. */
     @Volatile var healthy = false
+    @Volatile private var restartNow = false
+    @Volatile private var probeUntil = 0L
 
     fun start(c: Context) {
         synchronized(this) { if (started) return; started = true }
@@ -405,8 +407,19 @@ object ClipWatch {
                     val since = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
                     val p = Runtime.getRuntime().exec(arrayOf("logcat", "-T", since, "ClipboardService:E", "*:S"))
                     proc = p
+                    // Self-test: read the clipboard from the background so Android logs a denial for us. If this
+                    // watcher doesn't see that line it's blind (no log access): say so on the phone.
+                    thread {
+                        Thread.sleep(1500)
+                        healthy = false
+                        probeUntil = System.currentTimeMillis() + 3000
+                        runCatching { cm.primaryClip }
+                        Thread.sleep(3000)
+                        if (healthy) BlindNotice.hide(app) else BlindNotice.show(app)
+                    }
                     p.inputStream.bufferedReader().forEachLine { line ->
                         if (line.contains("Denying clipboard access")) healthy = true
+                        if (System.currentTimeMillis() < probeUntil) return@forEachLine // our own self-test, not a copy
                         if (line.contains(app.packageName) && Link.on("clip_out")) {
                             app.startActivity(Intent(app, ClipActivity::class.java)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))
@@ -414,7 +427,8 @@ object ClipWatch {
                     }
                 }
                 // A logcat that lived a while (or was restarted on purpose) comes back fast; one that keeps dying backs off to 30 s.
-                wait = if (System.currentTimeMillis() - began > 60_000 || healthy) 500L else minOf(wait * 2, 30_000L)
+                wait = if (restartNow || System.currentTimeMillis() - began > 60_000 || healthy) 300L else minOf(wait * 2, 30_000L)
+                restartNow = false
                 Thread.sleep(wait)
             }
         }
@@ -425,7 +439,8 @@ object ClipWatch {
      * Allow). One started in the background after an update or reboot is silently blind, so the app
      * calls this from its screen until a real clipboard line has been seen.
      */
-    fun restartIfBlind() { if (!healthy) proc?.destroy() }
+    fun restartIfBlind() { if (!healthy) { restartNow = true; proc?.destroy() } }
+
 
     /** Manual send (Quick Settings tile, share sheet): an image URI or text, straight to the Mac. */
     fun sendImage(c: Context, uri: Uri): Boolean {
@@ -476,6 +491,22 @@ class ClipActivity : Activity() {
         finish()
         @Suppress("DEPRECATION") overridePendingTransition(0, 0)
     }
+}
+
+/** "Turn on copy to Mac" — shown only while Android hasn't granted the log access the clipboard watcher needs. */
+object BlindNotice {
+    private const val ID = 7
+    fun show(c: Context) {
+        val nm = c.getSystemService(android.app.NotificationManager::class.java)
+        nm.createNotificationChannel(android.app.NotificationChannel("setup", "Setup", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+        val open = android.app.PendingIntent.getActivity(c, 0, Intent(c, MainActivity::class.java), android.app.PendingIntent.FLAG_IMMUTABLE)
+        nm.notify(ID, Notification.Builder(c, "setup")
+            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setContentTitle("Turn on copy to Mac")
+            .setContentText("Tap, then choose Allow, so what you copy reaches your Mac.")
+            .setContentIntent(open).setAutoCancel(true).build())
+    }
+    fun hide(c: Context) = c.getSystemService(android.app.NotificationManager::class.java).cancel(ID)
 }
 
 /** Quick Settings tile "Send to Mac": one tap sends whatever is on the clipboard, no log access needed. */

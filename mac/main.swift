@@ -295,6 +295,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
             // Keep the fingerprint: apps often remove and re-post the same notification when refreshing it.
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id])
         case "clip":
+            log("clipboard from phone: " + (j["text"] != nil ? "text" : "image"))
             guard syncClipboard else { return }
             if let t = j["text"] as? String { setClip(t) }
             else if let b = j["img"] as? String, let d = Data(base64Encoded: b), let png = sdrPNG(d) {
