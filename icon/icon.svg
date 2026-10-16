@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- PhoneBridge, Harshkit family: graphite tile, two interlocked links (silver = phone,
+       Harshkit gradient = Mac) that pass over and under each other, AI spark top right. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232327"/>
+      <stop offset="1" stop-color="#0a0a0c"/>
+    </linearGradient>
+    <radialGradient id="glowbg" cx=".5" cy=".55" r=".55">
+      <stop offset="0" stop-color="#5e5ce6" stop-opacity=".38"/>
+      <stop offset=".6" stop-color="#2997ff" stop-opacity=".08"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".55" stop-color="#e5e5ea"/>
+      <stop offset="1" stop-color="#a1a1a6"/>
+    </linearGradient>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2997ff"/>
+      <stop offset=".55" stop-color="#5e5ce6"/>
+      <stop offset="1" stop-color="#bf5af2"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7cc4ff"/>
+      <stop offset=".5" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#e879f9"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".15"/>
+      <stop offset=".45" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="40"/></filter>
+    <filter id="sparkglow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="18"/></filter>
+    <clipPath id="tile"><rect width="1024" height="1024" rx="228"/></clipPath>
+    <!-- interlock: where the links cross at the bottom, the silver one passes over -->
+    <clipPath id="low"><rect x="360" y="560" width="230" height="170"/></clipPath>
+    <mask id="under" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <g clip-path="url(#low)"><rect x="434" y="372" width="400" height="280" rx="140" fill="none" stroke="#fff" stroke-width="80"/></g>
+    </mask>
+    <path id="sparkle" d="M0,-1 C0.12,-0.12 0.12,-0.12 1,0 C0.12,0.12 0.12,0.12 0,1 C-0.12,0.12 -0.12,0.12 -1,0 C-0.12,-0.12 -0.12,-0.12 0,-1 Z"/>
+  </defs>
+
+  <g clip-path="url(#tile)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <rect width="1024" height="1024" fill="url(#glowbg)"/>
+
+    <!-- bridge glow, under the links -->
+    <rect x="250" y="400" width="560" height="260" rx="130" fill="url(#grad)" opacity=".55" filter="url(#blur)"/>
+
+    <rect x="190" y="372" width="400" height="280" rx="140" fill="none" stroke="url(#metal)" stroke-width="78"/>
+    <rect x="434" y="372" width="400" height="280" rx="140" fill="none" stroke="url(#grad)" stroke-width="78"/>
+    <rect x="190" y="372" width="400" height="280" rx="140" fill="none" stroke="url(#metal)" stroke-width="78" mask="url(#under)"/>
+
+    <!-- AI spark -->
+    <use href="#sparkle" transform="translate(830 200) scale(96)" fill="url(#spark)" filter="url(#sparkglow)" opacity=".9"/>
+    <use href="#sparkle" transform="translate(830 200) scale(82)" fill="url(#spark)"/>
+    <use href="#sparkle" transform="translate(830 200) scale(26)" fill="#fff" opacity=".85"/>
+    <use href="#sparkle" transform="translate(898 306) scale(30)" fill="url(#spark)" opacity=".95"/>
+
+    <rect width="1024" height="1024" fill="url(#sheen)"/>
+    <rect x="1.5" y="1.5" width="1021" height="1021" rx="226.5" fill="none" stroke="#fff" stroke-opacity=".10" stroke-width="3"/>
+  </g>
+</svg>

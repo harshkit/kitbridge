@@ -1,0 +1,11 @@
+.DS_Store
+build/
+.gradle/
+local.properties
+*.apk
+*.jks
+*.keystore
+*.hex
+.idea/
+*.iml
+icon/concepts/
