@@ -231,6 +231,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        ClipWatch.restartIfBlind() // on screen now, so Android can ask "Allow log access?"
         buildPerms()
         tick.post(object : Runnable {
             override fun run() { refresh(); tick.postDelayed(this, 1000) }

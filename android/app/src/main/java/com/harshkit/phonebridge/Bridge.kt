@@ -291,6 +291,7 @@ class BridgeService : NotificationListenerService() {
         val app = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() }
             .getOrDefault(sbn.packageName)
         Link.bump(cat.let { if (it == "call") "calls" else if (it == "msg") "msgs" else "apps" })
+        android.util.Log.i("PhoneBridge", "Forwarding ${sbn.packageName} ($cat)")
         val reply = n.actions?.firstOrNull { a -> a.remoteInputs?.any { it.allowFreeFormInput } == true }
         if (reply != null) Replies.remember(sbn.key, reply)
         Link.send(JSONObject().put("t", "notif").put("id", sbn.key).put("app", app)
@@ -327,6 +328,9 @@ class SmsReceiver : BroadcastReceiver() {
  */
 object ClipWatch {
     private var started = false
+    @Volatile private var proc: Process? = null
+    /** True once we've seen any system ClipboardService line, i.e. Android granted log access. */
+    @Volatile var healthy = false
 
     fun start(c: Context) {
         synchronized(this) { if (started) return; started = true }
@@ -339,16 +343,35 @@ object ClipWatch {
                 runCatching {
                     val since = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
                     val p = Runtime.getRuntime().exec(arrayOf("logcat", "-T", since, "ClipboardService:E", "*:S"))
+                    proc = p
                     p.inputStream.bufferedReader().forEachLine { line ->
+                        if (line.contains("Denying clipboard access")) healthy = true
                         if (line.contains(app.packageName) && Link.on("clip_out")) {
                             app.startActivity(Intent(app, ClipActivity::class.java)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))
                         }
                     }
                 }
-                Thread.sleep(2000)
+                Thread.sleep(500)
             }
         }
+    }
+
+    /**
+     * Android 13+ only grants log access to a logcat started while the app is on screen (the user taps
+     * Allow). One started in the background after an update or reboot is silently blind, so the app
+     * calls this from its screen until a real clipboard line has been seen.
+     */
+    fun restartIfBlind() { if (!healthy) proc?.destroy() }
+
+    /** Manual send (Quick Settings tile, share sheet): an image URI or text, straight to the Mac. */
+    fun sendImage(c: Context, uri: Uri): Boolean {
+        val bytes = c.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return false
+        if (bytes.size > 20 * 1024 * 1024) return false
+        Link.bump("clip")
+        Link.send(JSONObject().put("t", "clip").put("img", Base64.encodeToString(bytes, Base64.NO_WRAP)))
+        android.util.Log.i("PhoneBridge", "Clipboard to Mac: image")
+        return true
     }
 
     fun push(c: Context) {
@@ -360,11 +383,7 @@ object ClipWatch {
         val uri = item.uri
         if (uri != null && c.contentResolver.getType(uri)?.startsWith("image/") == true) {
             if (uri.authority == "com.harshkit.phonebridge.img") return // our own copy of a Mac image
-            val bytes = c.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return
-            if (bytes.size > 20 * 1024 * 1024) return
-            Link.bump("clip")
-            Link.send(JSONObject().put("t", "clip").put("img", Base64.encodeToString(bytes, Base64.NO_WRAP)))
-            android.util.Log.i("PhoneBridge", "Clipboard to Mac: image")
+            sendImage(c, uri)
         } else {
             val t = item.coerceToText(c)?.toString() ?: return
             if (t.isEmpty() || t == Link.lastClip) return
@@ -383,6 +402,38 @@ class ClipActivity : Activity() {
         runCatching { ClipWatch.push(this) }
         finish()
         @Suppress("DEPRECATION") overridePendingTransition(0, 0)
+    }
+}
+
+/** Quick Settings tile "Send to Mac": one tap sends whatever is on the clipboard, no log access needed. */
+class ClipTile : android.service.quicksettings.TileService() {
+    override fun onStartListening() {
+        qsTile?.apply { state = android.service.quicksettings.Tile.STATE_INACTIVE; updateTile() }
+    }
+    override fun onClick() {
+        val i = Intent(this, ClipActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (Build.VERSION.SDK_INT >= 34)
+            startActivityAndCollapse(android.app.PendingIntent.getActivity(this, 0, i, android.app.PendingIntent.FLAG_IMMUTABLE))
+        else @Suppress("DEPRECATION") startActivityAndCollapse(i)
+    }
+}
+
+/** Share → "Send to Mac" from any app: a photo or text goes straight to the Mac clipboard. */
+class SendActivity : Activity() {
+    override fun onCreate(b: Bundle?) {
+        super.onCreate(b)
+        Link.ctx = applicationContext
+        val uri = intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+        val ok = Link.connected && runCatching {
+            when {
+                uri != null -> ClipWatch.sendImage(this, uri)
+                !text.isNullOrEmpty() -> { Link.lastClip = text; Link.bump("clip"); Link.send(JSONObject().put("t", "clip").put("text", text)); true }
+                else -> false
+            }
+        }.getOrDefault(false)
+        Toast.makeText(this, if (ok) "Sent to your Mac — press ⌘V" else "Your Mac isn't connected", Toast.LENGTH_SHORT).show()
+        finish()
     }
 }
 
@@ -414,7 +465,7 @@ object Replies {
     @Synchronized fun justReplied(key: String) = (repliedAt[key] ?: 0) > System.currentTimeMillis() - 4000
 
     fun send(c: Context, key: String, text: String): Boolean {
-        val a = synchronized(this) { actions[key] } ?: return false
+        val a = synchronized(this) { actions[key] } ?: return false.also { android.util.Log.w("PhoneBridge", "Reply failed: notification no longer on the phone") }
         return try {
             val inputs = a.remoteInputs
             val results = Bundle().apply { inputs.forEach { putCharSequence(it.resultKey, text) } }
@@ -422,7 +473,8 @@ object Replies {
             android.app.RemoteInput.addResultsToIntent(inputs, fill, results)
             synchronized(this) { repliedAt[key] = System.currentTimeMillis() }
             a.actionIntent.send(c, 0, fill)
+            android.util.Log.i("PhoneBridge", "Reply sent via ${a.actionIntent.creatorPackage}")
             true
-        } catch (e: Exception) { false }
+        } catch (e: Exception) { android.util.Log.w("PhoneBridge", "Reply failed: ${e.javaClass.simpleName}"); false }
     }
 }

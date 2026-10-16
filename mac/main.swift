@@ -38,6 +38,14 @@ func sdrPNG(_ d: Data) -> Data? {
     return CGImageDestinationFinalize(dst) ? out as Data : nil
 }
 
+/// Tiny diagnostic log at ~/Library/Logs/PhoneBridge.log: events and app names only, never message text.
+func log(_ msg: String) {
+    let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/PhoneBridge.log")
+    let line = Data("\(ISO8601DateFormatter().string(from: Date())) \(msg)\n".utf8)
+    if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(line); try? h.close() }
+    else { try? line.write(to: url) }
+}
+
 func findCode(_ s: String) -> String? {
     let r = NSRange(s.startIndex..., in: s)
     guard otpHint.firstMatch(in: s, range: r) != nil, let m = otpCode.firstMatch(in: s, range: r),
@@ -101,6 +109,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
 
         Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [unowned self] _ in pollClipboard() }
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [unowned self] _ in send(["t": "ping"]) }
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [unowned self] _ in checkAlerts() } // notices when you turn alerts on
         refresh()
     }
 
@@ -124,7 +133,12 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
 
     func checkAlerts() {
         UNUserNotificationCenter.current().getNotificationSettings { s in
-            DispatchQueue.main.async { [self] in alertsOff = s.authorizationStatus != .authorized; refresh() }
+            DispatchQueue.main.async { [self] in
+                let off = s.authorizationStatus != .authorized
+                guard off != alertsOff || item.menu == nil else { return }
+                log("macOS notifications " + (off ? "NOT allowed (status \(s.authorizationStatus.rawValue))" : "allowed"))
+                alertsOff = off; refresh()
+            }
         }
     }
     @objc func openAlertSettings() {
@@ -212,6 +226,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
             phone = j["name"] as? String ?? "Phone"; refresh()
         case "notif":
             guard let id = j["id"] as? String else { return }
+            log("notification received from phone: \(j["app"] as? String ?? "?")")
             let app = j["app"] as? String ?? "", title = j["title"] as? String ?? "", text = j["text"] as? String ?? ""
             guard seen[id] != title + text else { return } // Android re-posts the same notification often
             if seen.count > 500 { seen.removeAll() } // bounded: ids are unique per SMS
@@ -229,7 +244,9 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
                 lastChange = pb.changeCount
                 content.subtitle = "Code \(code) copied — press ⌘V"
             }
-            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { e in
+                log("showing notification from \(app)" + (e.map { " — failed: \($0.localizedDescription)" } ?? ""))
+            }
         case "otp": // full SMS text, sent only so codes Android hides from listeners can still be copied
             let text = j["text"] as? String ?? ""
             guard let code = findCode(text) else { return }
