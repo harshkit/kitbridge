@@ -2,11 +2,11 @@
 
 ## Reporting a vulnerability
 
-Email **support@harshkit.com** with "PhoneBridge security" in the subject. Please don't open a public issue for security problems. You'll get a reply within two days.
+Email **support@harshkit.com** with "Kitbridge security" in the subject. Please don't open a public issue for security problems. You'll get a reply within two days.
 
 ## Design
 
-**Pairing.** On first launch the Mac app creates a random 256-bit key (`~/Library/Application Support/PhoneBridge/key.hex`, readable only by your user). `setup.sh` hands it to the phone once over adb, through an activity protected by `android.permission.DUMP`, a permission the adb shell holds and ordinary apps cannot get. So no other app on the phone can re-pair PhoneBridge to its own key.
+**Pairing.** On first launch the Mac app creates a random 256-bit key (`~/Library/Application Support/Kitbridge/key.hex`, readable only by your user). `setup.sh` hands it to the phone once over adb, through an activity protected by `android.permission.DUMP`, a permission the adb shell holds and ordinary apps cannot get. So no other app on the phone can re-pair Kitbridge to its own key.
 
 **Handshake (every connection).**
 
@@ -18,21 +18,21 @@ Only someone holding the pairing key can complete the handshake. The pairing key
 
 **Messages.** Each frame is `length ‖ nonce ‖ AES-256-GCM(ciphertext ‖ tag)`, with `nonce = direction byte ‖ 000 ‖ 64-bit counter`. Each side accepts only the next counter in order, so captured frames can't be replayed, reordered or reflected back. Any failed check closes the connection.
 
-**Hardening.** A connection is trusted only after its first valid encrypted message, so even a replayed handshake stays a stranger. Strangers get 5 seconds and 1 KB frames, and at most 8 can be pending at once. The pairing command copied from the Mac menu is marked as a concealed clip, so clipboard managers and PhoneBridge's own sync skip it. Clipboard items that password managers mark as secret (concealed on macOS, sensitive on Android) never leave the device they were copied on.
+**Hardening.** A connection is trusted only after its first valid encrypted message, so even a replayed handshake stays a stranger. Strangers get 5 seconds and 1 KB frames, and at most 8 can be pending at once. The pairing command copied from the Mac menu is marked as a concealed clip, so clipboard managers and Kitbridge's own sync skip it. Clipboard items that password managers mark as secret (concealed on macOS, sensitive on Android) never leave the device they were copied on.
 
 **Replies.** The Mac can only answer notifications the phone is sharing with it (your switches apply), and only through the app's own Reply action, the same one in your notification shade.
 
-**Copy detector (Accessibility).** Optional and off until you switch it on. Its configuration (`res/xml/copy_watcher.xml`) subscribes to three event types (taps, notification/pop-up changes, window changes) with `canRetrieveWindowContent="false"`, so it can't walk the screen's view tree. Android still passes it each event's own text: the label of what you tap and the text of pop-ups and notifications (which can include message bodies and codes). PhoneBridge checks that text only for "Copy" / "Copied" / the clipboard pop-up, never stores, logs or sends it, and logs only the source app's package name. An app could fake a "Copied" pop-up; that only makes PhoneBridge send what's already on your clipboard to your own Mac, with the sensitive-clip and on/off rules still applied. Turning it off in Accessibility settings turns automatic copy back to the log-watcher fallback.
+**Copy detector (Accessibility).** Optional and off until you switch it on. Its configuration (`res/xml/copy_watcher.xml`) subscribes to three event types (taps, notification/pop-up changes, window changes) with `canRetrieveWindowContent="false"`, so it can't walk the screen's view tree. Android still passes it each event's own text: the label of what you tap and the text of pop-ups and notifications (which can include message bodies and codes). Kitbridge checks that text only for "Copy" / "Copied" / the clipboard pop-up, never stores, logs or sends it, and logs only the source app's package name. An app could fake a "Copied" pop-up; that only makes Kitbridge send what's already on your clipboard to your own Mac, with the sensitive-clip and on/off rules still applied. Turning it off in Accessibility settings turns automatic copy back to the log-watcher fallback.
 
-**Send to Mac.** Any app can open the share target, so it accepts only shared `content://` items (never PhoneBridge's own files), reads at most 20 MB, and asks you to tap **Send** first, which another app can't do for you.
+**Send to Mac.** Any app can open the share target, so it accepts only shared `content://` items (never Kitbridge's own files), reads at most 20 MB, and asks you to tap **Send** first, which another app can't do for you.
 
-## What PhoneBridge does not protect against
+## What Kitbridge does not protect against
 
 - **Someone with your unlocked Mac or phone.** The pairing key is stored in the Mac user's Application Support folder and in the app's private storage on Android.
 - **What adb can do.** Setup uses wireless debugging, and anyone you pair with adb can control the phone. Turn Wireless debugging off after setup if you don't use it otherwise.
-- **READ_LOGS is broad.** Android grants it as "read all device logs". PhoneBridge only starts `logcat` filtered to the `ClipboardService` tag and only looks for its own package name, but the permission itself is wider. Turn off "Send my copies to Mac" and revoke it (`adb shell pm revoke com.harshkit.phonebridge android.permission.READ_LOGS`) if you'd rather not grant it.
+- **READ_LOGS is broad.** Android grants it as "read all device logs". Kitbridge only starts `logcat` filtered to the `ClipboardService` tag and only looks for its own package name, but the permission itself is wider. Turn off "Send my copies to Mac" and revoke it (`adb shell pm revoke com.harshkit.phonebridge android.permission.READ_LOGS`) if you'd rather not grant it.
 - **A determined flood on your Wi-Fi.** Someone on the network who keeps opening connections fast enough can delay your phone from connecting. They still can't read or send anything.
-- **Who's on your Wi-Fi.** People on your network can see that a PhoneBridge connection exists, and when and how much data flows, but not the contents.
+- **Who's on your Wi-Fi.** People on your network can see that a Kitbridge connection exists, and when and how much data flows, but not the contents.
 
 ## Verifying
 

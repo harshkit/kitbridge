@@ -1,6 +1,6 @@
-<p align="center"><img src="assets/icon.png" width="128" alt="PhoneBridge app icon: a silver and a blue-purple link interlocked"></p>
+<p align="center"><img src="assets/icon.png" width="128" alt="Kitbridge app icon: a silver and a blue-purple link interlocked"></p>
 
-<h1 align="center">PhoneBridge</h1>
+<h1 align="center">Kitbridge</h1>
 
 <p align="center"><sub>by <a href="https://www.harshkit.com/">Harshkit</a></sub></p>
 
@@ -9,30 +9,30 @@ Calls, messages and notifications on your Mac. OTP codes copied for you. One cli
 Free, open source, end-to-end encrypted, and it never touches the internet.</p>
 
 <p align="center">
-  <a href="https://github.com/harshkit/phonebridge/releases/latest"><img src="https://img.shields.io/github/v/release/harshkit/phonebridge?label=download&color=5e5ce6" alt="Latest release"></a>
+  <a href="https://github.com/harshkit/kitbridge/releases/latest"><img src="https://img.shields.io/github/v/release/harshkit/kitbridge?label=download&color=5e5ce6" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Android-13%2B-3ddc84?logo=android&logoColor=white" alt="Android 13+">
   <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14+">
   <img src="https://img.shields.io/badge/encryption-X25519%20%2B%20AES--256--GCM-2ea44f" alt="X25519 + AES-256-GCM">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
-<p align="center"><a href="https://www.harshkit.com/apps/phonebridge/">Website</a> · <a href="#install-one-line">Install</a> · <a href="#features">Features</a> · <a href="#how-it-works">How it works</a> · <a href="SECURITY.md">Security</a> · <a href="PRIVACY.md">Privacy</a></p>
+<p align="center"><a href="https://www.harshkit.com/apps/kitbridge/">Website</a> · <a href="#install-one-line">Install</a> · <a href="#features">Features</a> · <a href="#how-it-works">How it works</a> · <a href="SECURITY.md">Security</a> · <a href="PRIVACY.md">Privacy</a></p>
 
 ---
 
-iPhone owners get Continuity for free: texts on the Mac, codes that paste themselves, copy on one device and paste on the other. If your phone is a Samsung, Pixel or any other Android, you don't. **PhoneBridge closes that gap**: a small Android app and a Mac menu-bar app that talk directly to each other over your Wi-Fi, with no cloud, no account and no subscription.
+iPhone owners get Continuity for free: texts on the Mac, codes that paste themselves, copy on one device and paste on the other. If your phone is a Samsung, Pixel or any other Android, you don't. **Kitbridge closes that gap**: a small Android app and a Mac menu-bar app that talk directly to each other over your Wi-Fi, with no cloud, no account and no subscription.
 
-<p align="center"><img src="assets/android-app.png" width="300" alt="PhoneBridge on a Samsung Galaxy S26 Ultra: connected to a MacBook Air over an encrypted link at 17 ms, with today's counts and sync switches"></p>
+<p align="center"><img src="assets/android-app.png" width="300" alt="Kitbridge on a Samsung Galaxy S26 Ultra: connected to a MacBook Air over an encrypted link at 17 ms, with today's counts and sync switches"></p>
 
 ## Install (one line)
 
 On your Mac:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/harshkit/phonebridge/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/harshkit/kitbridge/main/install.sh | bash
 ```
 
-It installs the Mac app (menu bar, starts at login), then pairs your phone over Wi-Fi. For automatic copy from the phone, finally switch on **Settings → Accessibility → Installed apps → PhoneBridge: copy to Mac** (if Samsung greys it out: **Settings → Apps → PhoneBridge → ⋮ → Allow restricted settings**). On the phone you'll need **Settings → Developer options → Wireless debugging → Pair device with pairing code** once. The installer asks for the code shown there. After that, there's nothing to run: both sides connect on their own whenever they're on the same Wi-Fi.
+It installs the Mac app (menu bar, starts at login), then pairs your phone over Wi-Fi. For automatic copy from the phone, finally switch on **Settings → Accessibility → Installed apps → Kitbridge: copy to Mac** (if Samsung greys it out: **Settings → Apps → Kitbridge → ⋮ → Allow restricted settings**). On the phone you'll need **Settings → Developer options → Wireless debugging → Pair device with pairing code** once. The installer asks for the code shown there. After that, there's nothing to run: both sides connect on their own whenever they're on the same Wi-Fi.
 
 **Requirements:** a Mac on macOS 14 or later, an Android phone on Android 13 or later, both on the same Wi-Fi network. Tested on a Samsung Galaxy S26 Ultra (Android 17) with a MacBook Air.
 
@@ -61,16 +61,16 @@ It installs the Mac app (menu bar, starts at login), then pairs your phone over 
  └──────────────────────────────┘                 └──────────────────────────────┘
 ```
 
-Android deliberately makes a few of these things hard for apps. Here's what PhoneBridge does about each, all with your consent over `adb` during setup:
+Android deliberately makes a few of these things hard for apps. Here's what Kitbridge does about each, all with your consent over `adb` during setup:
 
-| Android limit | What PhoneBridge does |
+| Android limit | What Kitbridge does |
 |---|---|
 | Apps can't read other apps' notifications | Uses the official **notification access** permission, granted by setup (sideloaded apps can't flip it on themselves on Android 13+). |
-| Android 10+ blocks reading the clipboard in the background | A narrow **Accessibility** detector notices when you copy (a "Copy" tap or the system's "Copied" pop-up; it checks event text only for those words and never stores, logs or sends it), then PhoneBridge shows an invisible window for a few milliseconds to gain focus, reads the clip and closes. You switch it on once and it survives reboots and updates. Without it, a fallback watches the system's `Denying clipboard access` log line (READ_LOGS, the technique KDE Connect uses), which Android 13+ asks you to re-allow after each restart. |
-| Android 15+ hides OTP text from notification listeners | PhoneBridge reads the **SMS itself** (RECEIVE_SMS), so the full code reaches your Mac. |
+| Android 10+ blocks reading the clipboard in the background | A narrow **Accessibility** detector notices when you copy (a "Copy" tap or the system's "Copied" pop-up; it checks event text only for those words and never stores, logs or sends it), then Kitbridge shows an invisible window for a few milliseconds to gain focus, reads the clip and closes. You switch it on once and it survives reboots and updates. Without it, a fallback watches the system's `Denying clipboard access` log line (READ_LOGS, the technique KDE Connect uses), which Android 13+ asks you to re-allow after each restart. |
+| Android 15+ hides OTP text from notification listeners | Kitbridge reads the **SMS itself** (RECEIVE_SMS), so the full code reaches your Mac. |
 | Samsung filters Wi-Fi multicast, hiding Bonjour | Takes a **multicast lock** during discovery, and remembers the Mac's address so it rarely needs discovery at all. |
-| Battery savers drop background connections | Setup adds PhoneBridge to the battery-optimisation allowlist; the Mac pings every 10 s and the phone re-sends anything missed after a reconnect. |
-| Log access is granted only on screen (Android 13+) | Not needed when the Accessibility detector is on. Otherwise PhoneBridge shows a "Turn on copy to Mac" reminder after a reboot or update. The Send to Mac tile and share option never need either. |
+| Battery savers drop background connections | Setup adds Kitbridge to the battery-optimisation allowlist; the Mac pings every 10 s and the phone re-sends anything missed after a reconnect. |
+| Log access is granted only on screen (Android 13+) | Not needed when the Accessibility detector is on. Otherwise Kitbridge shows a "Turn on copy to Mac" reminder after a reboot or update. The Send to Mac tile and share option never need either. |
 | HDR photos look washed out on a Mac clipboard | The Mac converts them with Apple's ImageIO to a standard-range PNG (keeping the colour profile and rotation) and also keeps the original. |
 
 **Permissions the Android app uses:** notification access, RECEIVE_SMS, the optional **Accessibility copy detector** (Android passes it tap labels and pop-up/notification text; it checks only for Copy/Copied and keeps nothing), READ_LOGS (fallback copy detection, granted over adb), SYSTEM_ALERT_WINDOW (lets the invisible clipboard reader open from the background), POST_NOTIFICATIONS (the setup reminder), QUERY_ALL_PACKAGES (to show app names on the Mac), INTERNET and Wi-Fi state (local network only).
@@ -87,7 +87,7 @@ What it doesn't protect against, and the exact design, is in [SECURITY.md](SECUR
 ## Build from source
 
 ```bash
-git clone https://github.com/harshkit/phonebridge && cd phonebridge
+git clone https://github.com/harshkit/kitbridge && cd kitbridge
 ./mac/build.sh          # builds and installs the Mac app (needs Xcode Command Line Tools)
 ./setup.sh              # builds the Android app and pairs your phone (needs JDK 17 + Android SDK)
 ./mac/test/run.sh       # security tests against the running Mac app
@@ -99,8 +99,8 @@ Install the Android build tools with `brew install openjdk@17 && brew install --
 
 | Path | What |
 |---|---|
-| `android/app/src/main/java/com/harshkit/phonebridge/Bridge.kt` | Link, encryption, notification listener, SMS, clipboard |
-| `android/app/src/main/java/com/harshkit/phonebridge/Ui.kt` | The phone app's screen |
+| `android/app/src/main/java/com/harshkit/kitbridge/Bridge.kt` | Link, encryption, notification listener, SMS, clipboard |
+| `android/app/src/main/java/com/harshkit/kitbridge/Ui.kt` | The phone app's screen |
 | `mac/main.swift` | The whole Mac app |
 | `install.sh`, `setup.sh`, `mac/install-app.sh` | Installer, phone setup, Mac install |
 | `mac/test/` | Fake-phone attack tests and wire sniffer |
@@ -112,7 +112,7 @@ Install the Android build tools with `brew install openjdk@17 && brew install --
 - Answer or decline calls from the Mac
 - One-click hotspot from the Mac menu bar
 
-Ideas and bug reports are welcome in [Issues](https://github.com/harshkit/phonebridge/issues).
+Ideas and bug reports are welcome in [Issues](https://github.com/harshkit/kitbridge/issues).
 
 ## License
 

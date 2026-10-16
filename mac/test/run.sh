@@ -2,7 +2,7 @@
 # Security tests against the installed, running Mac app. Uses this Mac's own pairing key.
 set -euo pipefail
 cd "$(dirname "$0")"
-KEY="$HOME/Library/Application Support/PhoneBridge/key.hex"
+KEY="$HOME/Library/Application Support/Kitbridge/key.hex"
 swiftc -O fakephone.swift -o /tmp/pb-fakephone
 # The tests write to the Mac clipboard; put yours back afterwards.
 SAVED=$(mktemp); osascript -e 'the clipboard as «class utf8»' > "$SAVED" 2>/dev/null || true

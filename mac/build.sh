@@ -1,27 +1,27 @@
 #!/bin/bash
-# Builds PhoneBridge.app and installs it to /Applications.
+# Builds Kitbridge.app and installs it to /Applications.
 set -euo pipefail
 cd "$(dirname "$0")"
-swiftc -O main.swift -o /tmp/PhoneBridge-bin -framework AppKit
-swiftc -O -D TEST main.swift -o /tmp/PhoneBridge-test 2>/dev/null && /tmp/PhoneBridge-test --test
-A=build/PhoneBridge.app
+swiftc -O main.swift -o /tmp/Kitbridge-bin -framework AppKit
+swiftc -O -D TEST main.swift -o /tmp/Kitbridge-test 2>/dev/null && /tmp/Kitbridge-test --test
+A=build/Kitbridge.app
 rm -rf "$A"; mkdir -p "$A/Contents/MacOS" "$A/Contents/Resources"
-cp PhoneBridge.icns "$A/Contents/Resources/"
-mv /tmp/PhoneBridge-bin "$A/Contents/MacOS/PhoneBridge"
+cp Kitbridge.icns "$A/Contents/Resources/"
+mv /tmp/Kitbridge-bin "$A/Contents/MacOS/Kitbridge"
 cat > "$A/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>com.harshkit.phonebridge.mac</string>
-  <key>CFBundleName</key><string>PhoneBridge</string>
-  <key>CFBundleExecutable</key><string>PhoneBridge</string>
-  <key>CFBundleIconFile</key><string>PhoneBridge</string>
+  <key>CFBundleName</key><string>Kitbridge</string>
+  <key>CFBundleExecutable</key><string>Kitbridge</string>
+  <key>CFBundleIconFile</key><string>Kitbridge</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.1.1</string>
-  <key>CFBundleVersion</key><string>3</string>
+  <key>CFBundleShortVersionString</key><string>1.2.0</string>
+  <key>CFBundleVersion</key><string>4</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
-  <key>NSLocalNetworkUsageDescription</key><string>PhoneBridge talks to your phone on this Wi-Fi.</string>
+  <key>NSLocalNetworkUsageDescription</key><string>Kitbridge talks to your phone on this Wi-Fi.</string>
   <key>NSBonjourServices</key><array><string>_phonebridge._tcp</string></array>
 </dict></plist>
 PLIST

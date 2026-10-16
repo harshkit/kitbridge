@@ -1,15 +1,16 @@
 #!/bin/bash
-# Phone setup over Wireless debugging (or USB): installs PhoneBridge on Android, grants the
+# Phone setup over Wireless debugging (or USB): installs Kitbridge on Android, grants the
 # permissions a normal app can't get, and pairs it with this Mac's key.
-# Usage: ./setup.sh [PhoneBridge.apk]   (no argument: builds the APK from source)
+# Usage: ./setup.sh [Kitbridge.apk]   (no argument: builds the APK from source)
 set -euo pipefail
 cd "$(dirname "$0")"
 P=com.harshkit.phonebridge
-KEY="$HOME/Library/Application Support/PhoneBridge/key.hex"
+KEY="$HOME/Library/Application Support/Kitbridge/key.hex"
+[ -f "$KEY" ] || KEY="$HOME/Library/Application Support/PhoneBridge/key.hex" # before the rename
 ask() { read -r -p "$1" REPLY </dev/tty; echo "$REPLY"; }
 
 for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$KEY" ] && break; sleep 0.5; done
-[ -f "$KEY" ] || { echo "Start PhoneBridge on the Mac first (it creates the pairing key)."; exit 1; }
+[ -f "$KEY" ] || { echo "Start Kitbridge on the Mac first (it creates the pairing key)."; exit 1; }
 command -v adb >/dev/null || { echo "Needs adb: brew install --cask android-platform-tools"; exit 1; }
 
 # Find the phone; if none, pair over Wi-Fi.
@@ -35,7 +36,7 @@ echo "Phone: $(adb shell getprop ro.product.model) (Android $(adb shell getprop 
 APK="${1:-android/app/build/outputs/apk/release/app-release.apk}"
 [ -f "$APK" ] || (cd android && ./gradlew assembleRelease -q)
 if ! adb install -r "$APK" 2>/dev/null; then
-  echo "The installed PhoneBridge was signed differently; reinstalling (its settings reset, pairing is redone below)."
+  echo "The installed Kitbridge was signed differently; reinstalling (its settings reset, pairing is redone below)."
   adb uninstall "$P" >/dev/null; adb install "$APK"
 fi
 
@@ -51,6 +52,6 @@ ok adb shell dumpsys deviceidle whitelist +"$P"                             # no
 MAC_IP=$(ipconfig getifaddr en0 || ipconfig getifaddr en1 || true)
 adb shell am start -n "$P/.PairActivity" --es key "$(cat "$KEY")" --es host "$MAC_IP" >/dev/null
 echo "Paired."
-echo "For automatic copy from the phone: Settings → Accessibility → Installed apps → PhoneBridge: copy to Mac → On"
-echo "  (greyed out? Settings → Apps → PhoneBridge → ⋮ → Allow restricted settings, then try again)"
+echo "For automatic copy from the phone: Settings → Accessibility → Installed apps → Kitbridge: copy to Mac → On"
+echo "  (greyed out? Settings → Apps → Kitbridge → ⋮ → Allow restricted settings, then try again)"
 adb shell am start -a android.settings.ACCESSIBILITY_SETTINGS >/dev/null 2>&1 || true

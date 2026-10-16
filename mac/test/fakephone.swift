@@ -57,7 +57,7 @@ func waitClip(_ s: String) -> Int { let t = Date()
 if a.count > 3 && a[3] == "reply" {
     let r = Conn(); precondition(r.handshake())
     r.send(["t": "hello", "name": "Fake S26"])
-    r.send(["t": "notif", "id": "reply-\(UUID().uuidString.prefix(6))", "app": "WhatsApp", "title": "PhoneBridge test",
+    r.send(["t": "notif", "id": "reply-\(UUID().uuidString.prefix(6))", "app": "WhatsApp", "title": "Kitbridge test",
             "text": "Reply to this from your Mac 👋", "cat": "msg", "reply": true])
     print("Posted. Reply from the Mac notification… (10 min)")
     var tv = timeval(tv_sec: 600, tv_usec: 0); setsockopt(r.fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))

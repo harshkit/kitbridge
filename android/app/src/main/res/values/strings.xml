@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="copy_watcher_desc">Lets PhoneBridge notice when you copy something, so it can go to your Mac. Android passes this service the label of what you tap and the text of pop-ups and notifications; PhoneBridge checks only for Copy / Copied and never stores, logs or sends that text. Only the item you copied goes to your Mac.</string>
+    <string name="copy_watcher_desc">Lets Kitbridge notice when you copy something, so it can go to your Mac. Android passes this service the label of what you tap and the text of pop-ups and notifications; Kitbridge checks only for Copy / Copied and never stores, logs or sends that text. Only the item you copied goes to your Mac.</string>
 </resources>

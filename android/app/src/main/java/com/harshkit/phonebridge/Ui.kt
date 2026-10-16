@@ -119,7 +119,7 @@ class BridgeView(c: Context) : View(c) {
 
 /**
  * Pairing entry point. Protected by android.permission.DUMP, which adb's shell holds and no
- * ordinary app can get — so another app on the phone can't re-pair PhoneBridge to its own key.
+ * ordinary app can get — so another app on the phone can't re-pair Kitbridge to its own key.
  */
 class PairActivity : Activity() {
     override fun onCreate(b: Bundle?) {
@@ -136,12 +136,12 @@ class PairActivity : Activity() {
     }
 }
 
-/** Shared look for PhoneBridge's screens: dark iOS cards, type scale, rows, switches. */
+/** Shared look for Kitbridge's screens: dark iOS cards, type scale, rows, switches. */
 abstract class KitActivity : Activity() {
     override fun onResume() { super.onResume(); ClipWatch.screens++ }
     override fun onPause() {
         super.onPause(); ClipWatch.screens--
-        ClipWatch.probe(2000) // checks only if no PhoneBridge screen is showing 2 s later
+        ClipWatch.probe(2000) // checks only if no Kitbridge screen is showing 2 s later
     }
 
     protected val d get() = resources.displayMetrics.density
@@ -228,7 +228,7 @@ class MainActivity : KitActivity() {
         // Header: date eyebrow, large title, live status pill.
         col.addView(text(SimpleDateFormat("EEEE, d MMM", Locale.getDefault()).format(Date()).uppercase(), 13f, GREY, BOLD))
         val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        head.addView(text("PhoneBridge", 34f, Color.WHITE, HEAVY), LinearLayout.LayoutParams(0, -2, 1f))
+        head.addView(text("Kitbridge", 34f, Color.WHITE, HEAVY), LinearLayout.LayoutParams(0, -2, 1f))
         pill = text("", 13f, Color.WHITE, BOLD).apply { setPadding(dp(12), dp(6), dp(12), dp(6)) }
         head.addView(pill)
         col.addView(head, lp(top = 2, bottom = 14))
@@ -285,7 +285,7 @@ class MainActivity : KitActivity() {
 
         perms = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(perms)
-        col.addView(text("Harshkit · PhoneBridge", 13f, GREY).apply { gravity = Gravity.CENTER }, lp(top = 22))
+        col.addView(text("Harshkit · Kitbridge", 13f, GREY).apply { gravity = Gravity.CENTER }, lp(top = 22))
 
         // Android 15+ draws edge-to-edge: keep content clear of the status and gesture bars.
         // Scroll area stops at the status bar, so content never slides under the clock.
@@ -355,7 +355,7 @@ class MainActivity : KitActivity() {
             if (!listener) Triple("Notification access", ORANGE, { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) else null,
             if (!sms) Triple("Full SMS text for OTPs", 0xFF34C759.toInt(), { requestPermissions(arrayOf(Manifest.permission.RECEIVE_SMS), 1) }) else null,
             if (!copies) Triple("Send copies automatically", BLUE, {
-                Toast.makeText(this, "Installed apps → PhoneBridge: copy to Mac → On", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Installed apps → Kitbridge: copy to Mac → On", Toast.LENGTH_LONG).show()
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             }) else null,
         )
@@ -383,7 +383,7 @@ class HistoryActivity : KitActivity() {
         window.statusBarColor = BG; window.navigationBarColor = BG
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(12), dp(16), dp(32)) }
         val bar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        bar.addView(text("‹ PhoneBridge", 17f, BLUE).apply { setPadding(0, dp(8), dp(8), dp(8)); setOnClickListener { finish() } },
+        bar.addView(text("‹ Kitbridge", 17f, BLUE).apply { setPadding(0, dp(8), dp(8), dp(8)); setOnClickListener { finish() } },
             LinearLayout.LayoutParams(0, -2, 1f))
         bar.addView(text("Clear all", 17f, PINK).apply {
             setPadding(dp(8), dp(8), 0, dp(8))
@@ -432,7 +432,7 @@ class HistoryActivity : KitActivity() {
                 setOnClickListener { _ -> History.remove(kind, items.getJSONObject(i).optLong("t")); render() }
             })
             if (kind == "clip" && !it.optBoolean("img")) row.setOnClickListener { _ ->
-                getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("PhoneBridge", it.optString("text")))
+                getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("Kitbridge", it.optString("text")))
                 Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
             }
             group.addView(row)

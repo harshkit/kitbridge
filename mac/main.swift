@@ -7,7 +7,15 @@ import UserNotifications
 
 // Wire format (same as the phone): u32 big-endian length, then nonce(12) + AES-256-GCM ciphertext + tag(16).
 let maxFrame = 32 * 1024 * 1024
-let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/PhoneBridge")
+let dir: URL = {
+    let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
+    let new = support.appendingPathComponent("Kitbridge"), old = support.appendingPathComponent("PhoneBridge")
+    // Renamed from PhoneBridge: carry the pairing key and alert memory over, so nothing needs re-pairing.
+    if !FileManager.default.fileExists(atPath: new.path), FileManager.default.fileExists(atPath: old.path) {
+        try? FileManager.default.moveItem(at: old, to: new)
+    }
+    return new
+}()
 let keyFile = dir.appendingPathComponent("key.hex")
 
 func loadKeyHex() -> String {
@@ -41,9 +49,9 @@ func sdrPNG(_ d: Data) -> Data? {
     return CGImageDestinationFinalize(dst) ? out as Data : nil
 }
 
-/// Tiny diagnostic log at ~/Library/Logs/PhoneBridge.log: events and app names only, never message text.
+/// Tiny diagnostic log at ~/Library/Logs/Kitbridge.log: events and app names only, never message text.
 func log(_ msg: String) {
-    let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/PhoneBridge.log")
+    let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Kitbridge.log")
     let line = Data("\(ISO8601DateFormatter().string(from: Date())) \(msg)\n".utf8)
     if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(line); try? h.close() }
     else { try? line.write(to: url) }
@@ -78,7 +86,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     var pending = [Session]() // strangers still inside their 5-second handshake window, oldest first
     var conn: Session? // the live phone; set only once it has sent a valid session frame
     var phone = ""
-    var alertsOff = false // macOS notifications for PhoneBridge are turned off
+    var alertsOff = false // macOS notifications for Kitbridge are turned off
     // Alerts already shown, kept across restarts so a reconnect's catch-up never re-shows ones you cleared.
     // Stored as id → "HMAC-SHA256(pairing key, content)|time": keyed fingerprints, never text, and not guessable without the key.
     let seenFile = dir.appendingPathComponent("seen.json")
@@ -133,7 +141,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
 
     func refresh() {
         item.button?.image = NSImage(systemSymbolName: conn == nil ? "iphone.slash" : "iphone.radiowaves.left.and.right",
-                                     accessibilityDescription: "PhoneBridge")
+                                     accessibilityDescription: "Kitbridge")
         let m = NSMenu()
         m.addItem(withTitle: conn == nil ? "Waiting for phone…" : "Connected: \(phone)", action: nil, keyEquivalent: "")
         if alertsOff { m.addItem(withTitle: "⚠ Turn on notifications…", action: #selector(openAlertSettings), keyEquivalent: "") }

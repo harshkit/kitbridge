@@ -15,7 +15,7 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
-        android:label="PhoneBridge"
+        android:label="Kitbridge"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="false"
@@ -52,7 +52,7 @@
         <service
             android:name=".CopyWatcher"
             android:exported="false"
-            android:label="PhoneBridge: copy to Mac"
+            android:label="Kitbridge: copy to Mac"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

@@ -59,7 +59,7 @@ const val MAX_FRAME = 32 * 1024 * 1024
 object Link {
     lateinit var ctx: Context
     @Volatile var status = "Starting…"
-        set(v) { if (v != field) android.util.Log.i("PhoneBridge", v); field = v }
+        set(v) { if (v != field) android.util.Log.i("Kitbridge", v); field = v }
     @Volatile private var out: DataOutputStream? = null
     @Volatile private var sock: Socket? = null
     @Volatile var lastClip: String? = null
@@ -262,7 +262,7 @@ object Link {
             ClipData.newUri(ctx.contentResolver, "Mac image", Uri.parse("content://com.harshkit.phonebridge.img/clip.png?" + System.nanoTime()))
         }
         main.post { cm.setPrimaryClip(clip) } // writing the clipboard from the background is allowed
-        android.util.Log.i("PhoneBridge", "Clipboard from Mac: " + if (j.has("text")) "text" else "image")
+        android.util.Log.i("Kitbridge", "Clipboard from Mac: " + if (j.has("text")) "text" else "image")
     }
 
     fun hex(s: String) = ByteArray(s.length / 2) { s.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
@@ -321,7 +321,7 @@ class BridgeService : NotificationListenerService() {
         if (live) {
             Link.bump(if (cat == "call") "calls" else if (cat == "msg") "msgs" else "apps")
             if (cat != "app") History.add(if (cat == "call") "calls" else "msgs", JSONObject().put("app", app).put("title", title).put("text", text))
-            android.util.Log.i("PhoneBridge", "Forwarding $pkg ($cat)")
+            android.util.Log.i("Kitbridge", "Forwarding $pkg ($cat)")
         }
         val reply = replyAction(n)
         if (reply != null) Replies.remember(sbn.key, reply)
@@ -396,7 +396,7 @@ object ClipWatch {
     @Volatile private var restartNow = false
     @Volatile private var probeUntil = 0L
     @Volatile private var probeSkip = 0
-    @Volatile var screens = 0 // PhoneBridge screens currently showing; on screen the app is never denied, so the self-test waits
+    @Volatile var screens = 0 // Kitbridge screens currently showing; on screen the app is never denied, so the self-test waits
     val onScreen get() = screens > 0
     private lateinit var appCtx: Context
 
@@ -482,7 +482,7 @@ object ClipWatch {
         Link.bump("clip")
         Link.send(JSONObject().put("t", "clip").put("img", Base64.encodeToString(bytes, Base64.NO_WRAP)))
         History.add("clip", JSONObject().put("dir", "out").put("img", true).put("text", "Photo"))
-        android.util.Log.i("PhoneBridge", "Clipboard to Mac: image")
+        android.util.Log.i("Kitbridge", "Clipboard to Mac: image")
         return true
     }
 
@@ -499,24 +499,24 @@ object ClipWatch {
 
     fun push(c: Context) {
         val clip = c.getSystemService(ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }
-            ?: return android.util.Log.w("PhoneBridge", "Clipboard read: empty or not allowed").let {}
+            ?: return android.util.Log.w("Kitbridge", "Clipboard read: empty or not allowed").let {}
         // Password managers mark secrets as sensitive; those never leave the phone.
         val x = clip.description.extras
         if (x?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true || x?.getBoolean("android.content.extra.IS_SENSITIVE") == true)
-            return android.util.Log.i("PhoneBridge", "Clipboard: marked sensitive, not sent").let {}
+            return android.util.Log.i("Kitbridge", "Clipboard: marked sensitive, not sent").let {}
         val item = clip.getItemAt(0)
         val uri = item.uri
         if (uri != null && c.contentResolver.getType(uri)?.startsWith("image/") == true) {
             if (uri.authority == "com.harshkit.phonebridge.img") return // our own copy of a Mac image
-            if (!sendImage(c, uri)) android.util.Log.w("PhoneBridge", "Clipboard image not sent (unreadable or over 20 MB)")
+            if (!sendImage(c, uri)) android.util.Log.w("Kitbridge", "Clipboard image not sent (unreadable or over 20 MB)")
         } else {
             val t = item.coerceToText(c)?.toString() ?: return
-            if (t.isEmpty() || t == Link.lastClip) return android.util.Log.i("PhoneBridge", "Clipboard: same as last, skipped").let {}
+            if (t.isEmpty() || t == Link.lastClip) return android.util.Log.i("Kitbridge", "Clipboard: same as last, skipped").let {}
             Link.lastClip = t
             Link.bump("clip")
             Link.send(JSONObject().put("t", "clip").put("text", t))
             History.add("clip", JSONObject().put("dir", "out").put("text", t))
-            android.util.Log.i("PhoneBridge", "Clipboard to Mac: text")
+            android.util.Log.i("Kitbridge", "Clipboard to Mac: text")
         }
     }
 }
@@ -525,7 +525,7 @@ object ClipWatch {
 class ClipActivity : Activity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         if (!hasFocus) return
-        runCatching { ClipWatch.push(this) }.onFailure { android.util.Log.w("PhoneBridge", "Clipboard read failed: ${it.javaClass.simpleName}") }
+        runCatching { ClipWatch.push(this) }.onFailure { android.util.Log.w("Kitbridge", "Clipboard read failed: ${it.javaClass.simpleName}") }
         finish()
         @Suppress("DEPRECATION") overridePendingTransition(0, 0)
     }
@@ -562,7 +562,7 @@ class CopyWatcher : android.accessibilityservice.AccessibilityService() {
             else -> label.contains("copied", ignoreCase = true) || cls.contains("clipboard", ignoreCase = true)
         }
         if (copied) {
-            android.util.Log.i("PhoneBridge", "Copy detected (${e.packageName}, type ${e.eventType})")
+            android.util.Log.i("Kitbridge", "Copy detected (${e.packageName}, type ${e.eventType})")
             ClipWatch.trigger(this)
         }
     }
@@ -679,7 +679,7 @@ object Replies {
                 val svc = BridgeService.instance
                 svc?.activeNotifications?.firstOrNull { it.key == key && svc.shareable(it) != null } // only what you share with the Mac
             }.getOrNull()?.notification?.let(BridgeService::replyAction)
-            ?: return false.also { android.util.Log.w("PhoneBridge", "Reply failed: notification no longer on the phone") }
+            ?: return false.also { android.util.Log.w("Kitbridge", "Reply failed: notification no longer on the phone") }
         return try {
             val inputs = a.remoteInputs
             val results = Bundle().apply { inputs.forEach { putCharSequence(it.resultKey, text) } }
@@ -687,9 +687,9 @@ object Replies {
             android.app.RemoteInput.addResultsToIntent(inputs, fill, results)
             synchronized(this) { repliedAt[key] = System.currentTimeMillis() }
             a.actionIntent.send(c, 0, fill)
-            android.util.Log.i("PhoneBridge", "Reply sent via ${a.actionIntent.creatorPackage}")
+            android.util.Log.i("Kitbridge", "Reply sent via ${a.actionIntent.creatorPackage}")
             true
-        } catch (e: Exception) { android.util.Log.w("PhoneBridge", "Reply failed: ${e.javaClass.simpleName}"); false }
+        } catch (e: Exception) { android.util.Log.w("Kitbridge", "Reply failed: ${e.javaClass.simpleName}"); false }
     }
 }
 
