@@ -340,7 +340,11 @@ object ClipWatch {
     }
 
     fun push(c: Context) {
-        val item = c.getSystemService(ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0) ?: return
+        val clip = c.getSystemService(ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 } ?: return
+        // Password managers mark secrets as sensitive; those never leave the phone.
+        val x = clip.description.extras
+        if (x?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true || x?.getBoolean("android.content.extra.IS_SENSITIVE") == true) return
+        val item = clip.getItemAt(0)
         val uri = item.uri
         if (uri != null && c.contentResolver.getType(uri)?.startsWith("image/") == true) {
             if (uri.authority == "com.harshkit.phonebridge.img") return // our own copy of a Mac image

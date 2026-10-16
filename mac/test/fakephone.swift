@@ -12,6 +12,7 @@ final class Conn {
     let fd: Int32
     var key: SymmetricKey!, tx: UInt64 = 0, rx: UInt64 = 0
     var sent = [Data]()
+    var hs = Data()
     init() {
         var addr = sockaddr_in(); addr.sin_family = sa_family_t(AF_INET); addr.sin_port = port.bigEndian
         addr.sin_addr.s_addr = inet_addr("127.0.0.1")
@@ -25,7 +26,8 @@ final class Conn {
     func frame() -> Data? { guard let h = readN(4) else { return nil }; return readN(Int(h.withUnsafeBytes { $0.load(as: UInt32.self).bigEndian })) }
     func handshake(with k: SymmetricKey = psk) -> Bool {
         let eph = Curve25519.KeyAgreement.PrivateKey(), myPub = eph.publicKey.rawRepresentation
-        raw(try! AES.GCM.seal(myPub, using: k).combined!)
+        hs = try! AES.GCM.seal(myPub, using: k).combined!
+        raw(hs)
         guard let f = frame(), let macPub = try? AES.GCM.open(.init(combined: f), using: k) else { return false }
         let secret = try! eph.sharedSecretFromKeyAgreement(with: .init(rawRepresentation: macPub))
         key = secret.hkdfDerivedSymmetricKey(using: SHA256.self, salt: k.withUnsafeBytes { Data($0) },
@@ -70,3 +72,7 @@ let w = Conn(); print(!w.handshake(with: SymmetricKey(size: .bits256)) ? "✓ wr
 // Old session replayed on a brand-new connection: the attacker can resend frames but has no session key.
 let r = Conn(); r.raw(c.sent[1]); usleep(300_000)
 print(r.closed() ? "✓ old-session frame on new connection rejected" : "✗ FAIL: cross-session replay accepted")
+
+// Replayed handshake: the Mac answers, but must still treat the peer as a stranger (1 KB cap).
+let h = Conn(); h.raw(c.hs); _ = h.frame(); h.raw(Data(count: 4096)); usleep(300_000)
+print(h.closed() ? "✓ replayed handshake stays untrusted (big frame refused)" : "✗ FAIL: replayed handshake lifted the limits")

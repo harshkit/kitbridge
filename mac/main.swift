@@ -32,6 +32,7 @@ final class Session {
     let c: NWConnection
     var key: SymmetricKey?
     var tx: UInt64 = 0, rx: UInt64 = 0
+    var authed = false // true only after the first valid session frame: a replayed handshake never gets here
     init(_ c: NWConnection) { self.c = c }
 }
 
@@ -45,6 +46,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     }))
     var item: NSStatusItem!
     var listener: NWListener!
+    var pending = 0     // connections still inside their 5-second handshake window
     var conn: Session? // the live phone; set only once it has sent a valid session frame
     var phone = ""
     var seen = [String: String]()
@@ -63,10 +65,16 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         listener = try! NWListener(using: p, on: 47811) // fixed port: the phone can reconnect without discovery
         listener.service = NWListener.Service(name: Host.current().localizedName ?? "Mac", type: "_phonebridge._tcp")
         listener.newConnectionHandler = { [unowned self] c in
+            // At most 8 strangers at once; a flood of half-open connections can't pile up.
+            guard pending < 8 else { return c.cancel() }
             let s = Session(c)
+            pending += 1
             c.start(queue: .main); read(s)
             // Strangers get 5 s to complete the handshake, then they're gone.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [unowned self] in if s.key == nil { drop(s) } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [unowned self] in
+                pending -= 1
+                if !s.authed { drop(s) }
+            }
         }
         listener.start(queue: .main)
 
@@ -109,7 +117,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         s.c.receive(minimumIncompleteLength: 4, maximumLength: 4) { [unowned self] d, _, _, _ in
             guard let d, d.count == 4 else { return drop(s) }
             let n = Int(d.withUnsafeBytes { $0.load(as: UInt32.self).bigEndian })
-            guard (28...(s.key == nil ? 1024 : maxFrame)).contains(n) else { return drop(s) } // unauthenticated: tiny frames only
+            guard (28...(s.authed ? maxFrame : 1024)).contains(n) else { return drop(s) } // unauthenticated: tiny frames only
             s.c.receive(minimumIncompleteLength: n, maximumLength: n) { [unowned self] body, _, _, _ in
                 guard let body, body.count == n, frame(s, body) else { return drop(s) }
                 read(s)
@@ -138,6 +146,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
               let plain = try? AES.GCM.open(box, using: sk),
               let j = try? JSONSerialization.jsonObject(with: plain) as? [String: Any] else { return false }
         s.rx += 1
+        s.authed = true
         if conn !== s { conn?.c.cancel(); conn = s; refresh(); send(["t": "hello", "name": Host.current().localizedName ?? "Mac"]) }
         handle(j)
         return true

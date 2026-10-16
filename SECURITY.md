@@ -18,7 +18,7 @@ Only someone holding the pairing key can complete the handshake. The pairing key
 
 **Messages.** Each frame is `length ‖ nonce ‖ AES-256-GCM(ciphertext ‖ tag)`, with `nonce = direction byte ‖ 000 ‖ 64-bit counter`. Each side accepts only the next counter in order, so captured frames can't be replayed, reordered or reflected back. Any failed check closes the connection.
 
-**Hardening.** Unauthenticated connections get 5 seconds and 1 KB frames to complete the handshake. The pairing command copied from the Mac menu is marked as a concealed clip, so clipboard managers and PhoneBridge's own sync skip it. Mac clipboard items marked concealed by password managers are never sent to the phone.
+**Hardening.** A connection is trusted only after its first valid encrypted message, so even a replayed handshake stays a stranger. Strangers get 5 seconds and 1 KB frames, and at most 8 can be pending at once. The pairing command copied from the Mac menu is marked as a concealed clip, so clipboard managers and PhoneBridge's own sync skip it. Clipboard items that password managers mark as secret (concealed on macOS, sensitive on Android) never leave the device they were copied on.
 
 ## What PhoneBridge does not protect against
 
