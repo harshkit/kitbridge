@@ -310,6 +310,7 @@ class BridgeService : NotificationListenerService() {
         val e = n.extras
         val cat = shareable(sbn) ?: return
         if (live && Replies.justReplied(sbn.key)) return // the app re-posts the thread with your own reply in it
+        if (cat == "msg" && lastMessageIsMine(n)) return // "You: …" — your own message, nothing to alert
         val title = e.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
         val text = (e.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: e.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
         if (title.isEmpty() && text.isEmpty()) return
@@ -329,6 +330,13 @@ class BridgeService : NotificationListenerService() {
             avatar(n.getLargeIcon()?.loadDrawable(this), packageManager.getApplicationIcon(pkg))
         }.getOrNull()?.let { j.put("photo", it) }
         Link.send(j)
+    }
+
+    /** In a chat notification, a message with no sender is one you sent (Android's MessagingStyle). */
+    private fun lastMessageIsMine(n: Notification): Boolean {
+        @Suppress("DEPRECATION") val msgs = n.extras.getParcelableArray(Notification.EXTRA_MESSAGES) ?: return false
+        val last = msgs.lastOrNull() as? Bundle ?: return false
+        return last.getCharSequence("sender") == null && last.get("sender_person") == null
     }
 
     private fun avatar(photo: android.graphics.drawable.Drawable?, icon: android.graphics.drawable.Drawable, size: Int = 192): String {
@@ -390,7 +398,9 @@ object ClipWatch {
         Handler(Looper.getMainLooper()).post { cm.addPrimaryClipChangedListener {} }
         if (app.checkSelfPermission(Manifest.permission.READ_LOGS) != PackageManager.PERMISSION_GRANTED) return
         thread(name = "clipwatch") {
+            var wait = 500L
             while (true) {
+                val began = System.currentTimeMillis()
                 runCatching {
                     val since = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
                     val p = Runtime.getRuntime().exec(arrayOf("logcat", "-T", since, "ClipboardService:E", "*:S"))
@@ -403,7 +413,9 @@ object ClipWatch {
                         }
                     }
                 }
-                Thread.sleep(500)
+                // A logcat that lived a while (or was restarted on purpose) comes back fast; one that keeps dying backs off to 30 s.
+                wait = if (System.currentTimeMillis() - began > 60_000 || healthy) 500L else minOf(wait * 2, 30_000L)
+                Thread.sleep(wait)
             }
         }
     }
@@ -494,10 +506,17 @@ class SendActivity : Activity() {
         if (uri == null && text.isNullOrEmpty()) return finish()
         android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(if (uri != null) "Send this image to your Mac?" else "Send this text to your Mac?")
+            .apply { if (uri == null) setMessage(text!!.take(200) + if (text.length > 200) "…" else "") else setView(
+                android.widget.ImageView(this@SendActivity).apply {
+                    adjustViewBounds = true; maxHeight = (240 * resources.displayMetrics.density).toInt()
+                    runCatching { setImageURI(uri) }
+                }) }
             .setPositiveButton("Send") { _, _ -> send(uri, text) }
             .setNegativeButton("Cancel") { _, _ -> finish() }
             .setOnCancelListener { finish() }
             .show()
+            // Ignore taps while another app draws over the dialog (tapjacking).
+            .run { listOf(android.content.DialogInterface.BUTTON_POSITIVE, android.content.DialogInterface.BUTTON_NEGATIVE).forEach { getButton(it)?.filterTouchesWhenObscured = true } }
     }
 
     private fun send(uri: Uri?, text: String?) {
@@ -534,7 +553,9 @@ object Replies {
     private val actions = object : LinkedHashMap<String, Notification.Action>() {
         override fun removeEldestEntry(e: MutableMap.MutableEntry<String, Notification.Action>) = size > 200
     }
-    private val repliedAt = HashMap<String, Long>()
+    private val repliedAt = object : LinkedHashMap<String, Long>() {
+        override fun removeEldestEntry(e: MutableMap.MutableEntry<String, Long>) = size > 200
+    }
 
     @Synchronized fun remember(key: String, a: Notification.Action) { actions[key] = a }
     @Synchronized fun forget(key: String) { actions.remove(key) }

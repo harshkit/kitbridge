@@ -27,7 +27,10 @@ let otpCode = try! NSRegularExpression(pattern: "(?<![\\d₹$])(?<!\\d[.,])(\\d{
 func sdrPNG(_ d: Data) -> Data? {
     guard let src = CGImageSourceCreateWithData(d as CFData, nil),
           let p = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] else { return nil }
-    let side = max(p[kCGImagePropertyPixelWidth] as? Int ?? 0, p[kCGImagePropertyPixelHeight] as? Int ?? 0)
+    let w = p[kCGImagePropertyPixelWidth] as? Int ?? 0, h = p[kCGImagePropertyPixelHeight] as? Int ?? 0
+    // A tiny file can claim gigantic dimensions; refuse before decoding anything (64 MP / 16k px covers any phone photo).
+    guard w > 0, h > 0, w * h <= 64_000_000, max(w, h) <= 16_384 else { return nil }
+    let side = max(w, h)
     let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
                                  kCGImageSourceCreateThumbnailWithTransform: true, // apply EXIF rotation
                                  kCGImageSourceThumbnailMaxPixelSize: side]        // full size, no downscale
@@ -76,7 +79,19 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     var conn: Session? // the live phone; set only once it has sent a valid session frame
     var phone = ""
     var alertsOff = false // macOS notifications for PhoneBridge are turned off
-    var seen = [String: String]()
+    // Alerts already shown, kept across restarts so a reconnect's catch-up never re-shows ones you cleared.
+    // Stored as id → "HMAC-SHA256(pairing key, content)|time": keyed fingerprints, never text, and not guessable without the key.
+    let seenFile = dir.appendingPathComponent("seen.json")
+    lazy var seen: [String: String] = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: seenFile))) ?? [:]
+    func fingerprint(_ s: String) -> String { HMAC<SHA256>.authenticationCode(for: Data(s.utf8), using: key).map { String(format: "%02x", $0) }.joined() }
+    func remember(_ id: String, _ content: String?) {
+        seen[id] = content.map { "\(fingerprint($0))|\(Int(Date().timeIntervalSince1970))" }
+        if seen.count > 1000 { // keep the newest 500
+            let keep = seen.sorted { ($0.value.split(separator: "|").last ?? "") > ($1.value.split(separator: "|").last ?? "") }.prefix(500)
+            seen = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
+        }
+        try? JSONEncoder().encode(seen).write(to: seenFile, options: .atomic)
+    }
     let pb = NSPasteboard.general
     lazy var lastChange = pb.changeCount
     var syncClipboard = UserDefaults.standard.object(forKey: "clip") as? Bool ?? true
@@ -228,9 +243,9 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
             guard let id = j["id"] as? String else { return }
             log("notification received from phone: \(j["app"] as? String ?? "?")")
             let app = j["app"] as? String ?? "", title = j["title"] as? String ?? "", text = j["text"] as? String ?? ""
-            guard seen[id] != title + text else { return } // Android re-posts the same notification often
-            if seen.count > 500 { seen.removeAll() } // bounded: ids are unique per SMS
-            seen[id] = title + text
+            // Android re-posts the same notification often, and every reconnect re-sends recent ones.
+            guard seen[id]?.hasPrefix(fingerprint(title + text)) != true else { return }
+            remember(id, title + text)
             let content = UNMutableNotificationContent()
             content.title = title.isEmpty ? app : title
             content.subtitle = title.isEmpty ? "" : app
@@ -243,6 +258,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
             if let b = j["photo"] as? String, let d = Data(base64Encoded: b) {
                 let f = FileManager.default.temporaryDirectory.appendingPathComponent("pb-\(UUID().uuidString).png")
                 if (try? d.write(to: f)) != nil, let a = try? UNNotificationAttachment(identifier: "photo", url: f) { content.attachments = [a] }
+                else { try? FileManager.default.removeItem(at: f) }
             }
             if let code = findCode(title + " " + text) {
                 setClip(code)
@@ -250,7 +266,9 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
                 lastChange = pb.changeCount
                 content.subtitle = "Code \(code) copied — press ⌘V"
             }
+            let tmp = content.attachments.first?.url
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { e in
+                if e != nil, let tmp { try? FileManager.default.removeItem(at: tmp) } // on success macOS has moved it
                 log("showing notification from \(app)" + (e.map { " — failed: \($0.localizedDescription)" } ?? ""))
             }
         case "otp": // full SMS text, sent only so codes Android hides from listeners can still be copied
@@ -273,7 +291,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         case "notif_rm":
             guard let id = j["id"] as? String else { return }
-            seen[id] = nil
+            // Keep the fingerprint: apps often remove and re-post the same notification when refreshing it.
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id])
         case "clip":
             guard syncClipboard else { return }
