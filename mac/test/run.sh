@@ -4,7 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 KEY="$HOME/Library/Application Support/PhoneBridge/key.hex"
 swiftc -O fakephone.swift -o /tmp/pb-fakephone
-WIRE=$(mktemp); trap 'rm -f "$WIRE"; kill $SNIFF 2>/dev/null' EXIT
+# The tests write to the Mac clipboard; put yours back afterwards.
+SAVED=$(mktemp); osascript -e 'the clipboard as «class utf8»' > "$SAVED" 2>/dev/null || true
+WIRE=$(mktemp); trap 'rm -f "$WIRE"; kill $SNIFF 2>/dev/null; [ -s "$SAVED" ] && pbcopy < "$SAVED"; rm -f "$SAVED"' EXIT
 python3 -I sniff.py 47900 47811 "$WIRE" & SNIFF=$!
 sleep 1
 /tmp/pb-fakephone "$KEY" 47900

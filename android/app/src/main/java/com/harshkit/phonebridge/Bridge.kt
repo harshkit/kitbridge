@@ -395,7 +395,9 @@ object ClipWatch {
     @Volatile var healthy = false
     @Volatile private var restartNow = false
     @Volatile private var probeUntil = 0L
-    @Volatile var onScreen = false // the app on screen is never denied, so the self-test only means something in the background
+    @Volatile private var probeSkip = 0
+    @Volatile var screens = 0 // PhoneBridge screens currently showing; on screen the app is never denied, so the self-test waits
+    val onScreen get() = screens > 0
     private lateinit var appCtx: Context
 
     fun start(c: Context) {
@@ -416,7 +418,9 @@ object ClipWatch {
                     probe(1500)
                     p.inputStream.bufferedReader().forEachLine { line ->
                         if (line.contains("Denying clipboard access")) healthy = true
-                        if (System.currentTimeMillis() < probeUntil) return@forEachLine // our own self-test, not a copy
+                        if (line.contains(app.packageName) && probeSkip > 0 && System.currentTimeMillis() < probeUntil) {
+                            probeSkip = 0; return@forEachLine // exactly one line: our own self-test, never a copy
+                        }
                         if (line.contains(app.packageName) && Link.on("clip_out")) {
                             app.startActivity(Intent(app, ClipActivity::class.java)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))
@@ -447,9 +451,11 @@ object ClipWatch {
         Thread.sleep(delayMs)
         if (onScreen || !::appCtx.isInitialized) return@thread
         healthy = false
+        probeSkip = 1
         probeUntil = System.currentTimeMillis() + 3000
         runCatching { appCtx.getSystemService(ClipboardManager::class.java).primaryClip }
         Thread.sleep(3000)
+        probeSkip = 0
         if (onScreen) return@thread
         if (healthy) BlindNotice.hide(appCtx) else BlindNotice.show(appCtx)
     }
@@ -477,18 +483,20 @@ object ClipWatch {
     }
 
     fun push(c: Context) {
-        val clip = c.getSystemService(ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 } ?: return
+        val clip = c.getSystemService(ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }
+            ?: return android.util.Log.w("PhoneBridge", "Clipboard read: empty or not allowed").let {}
         // Password managers mark secrets as sensitive; those never leave the phone.
         val x = clip.description.extras
-        if (x?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true || x?.getBoolean("android.content.extra.IS_SENSITIVE") == true) return
+        if (x?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true || x?.getBoolean("android.content.extra.IS_SENSITIVE") == true)
+            return android.util.Log.i("PhoneBridge", "Clipboard: marked sensitive, not sent").let {}
         val item = clip.getItemAt(0)
         val uri = item.uri
         if (uri != null && c.contentResolver.getType(uri)?.startsWith("image/") == true) {
             if (uri.authority == "com.harshkit.phonebridge.img") return // our own copy of a Mac image
-            sendImage(c, uri)
+            if (!sendImage(c, uri)) android.util.Log.w("PhoneBridge", "Clipboard image not sent (unreadable or over 20 MB)")
         } else {
             val t = item.coerceToText(c)?.toString() ?: return
-            if (t.isEmpty() || t == Link.lastClip) return
+            if (t.isEmpty() || t == Link.lastClip) return android.util.Log.i("PhoneBridge", "Clipboard: same as last, skipped").let {}
             Link.lastClip = t
             Link.bump("clip")
             Link.send(JSONObject().put("t", "clip").put("text", t))
@@ -502,7 +510,7 @@ object ClipWatch {
 class ClipActivity : Activity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         if (!hasFocus) return
-        runCatching { ClipWatch.push(this) }
+        runCatching { ClipWatch.push(this) }.onFailure { android.util.Log.w("PhoneBridge", "Clipboard read failed: ${it.javaClass.simpleName}") }
         finish()
         @Suppress("DEPRECATION") overridePendingTransition(0, 0)
     }
@@ -582,7 +590,10 @@ class SendActivity : Activity() {
         val ok = Link.connected && runCatching {
             when {
                 uri != null -> ClipWatch.sendImage(this, uri)
-                !text.isNullOrEmpty() -> { Link.lastClip = text; Link.bump("clip"); Link.send(JSONObject().put("t", "clip").put("text", text)); true }
+                !text.isNullOrEmpty() -> {
+                    Link.lastClip = text; Link.bump("clip"); Link.send(JSONObject().put("t", "clip").put("text", text))
+                    History.add("clip", JSONObject().put("dir", "out").put("text", text)); true
+                }
                 else -> false
             }
         }.getOrDefault(false)
@@ -645,11 +656,17 @@ object Replies {
 object History {
     private const val MAX = 20
     @Synchronized fun add(kind: String, item: JSONObject) = runCatching {
+        item.put("text", item.optString("text").take(2000))
         val old = list(kind); val next = org.json.JSONArray().put(item.put("t", System.currentTimeMillis()))
         for (i in 0 until minOf(old.length(), MAX - 1)) next.put(old.get(i))
         Link.prefs.edit().putString("h_$kind", next.toString()).apply()
     }
     @Synchronized fun list(kind: String) = runCatching { org.json.JSONArray(Link.prefs.getString("h_$kind", "[]")) }.getOrDefault(org.json.JSONArray())
-    @Synchronized fun remove(kind: String, index: Int) { val a = list(kind); a.remove(index); Link.prefs.edit().putString("h_$kind", a.toString()).apply() }
+    /** Removes the item with this timestamp (not a position, so a new arrival can't shift what you delete). */
+    @Synchronized fun remove(kind: String, t: Long) {
+        val a = list(kind); val keep = org.json.JSONArray()
+        for (i in 0 until a.length()) a.getJSONObject(i).let { if (it.optLong("t") != t) keep.put(it) }
+        Link.prefs.edit().putString("h_$kind", keep.toString()).apply()
+    }
     @Synchronized fun clear(kind: String) = Link.prefs.edit().remove("h_$kind").apply()
 }

@@ -138,6 +138,12 @@ class PairActivity : Activity() {
 
 /** Shared look for PhoneBridge's screens: dark iOS cards, type scale, rows, switches. */
 abstract class KitActivity : Activity() {
+    override fun onResume() { super.onResume(); ClipWatch.screens++ }
+    override fun onPause() {
+        super.onPause(); ClipWatch.screens--
+        ClipWatch.probe(2000) // checks only if no PhoneBridge screen is showing 2 s later
+    }
+
     protected val d get() = resources.displayMetrics.density
     protected fun dp(v: Number) = (v.toFloat() * d).toInt()
 
@@ -295,7 +301,6 @@ class MainActivity : KitActivity() {
 
     override fun onResume() {
         super.onResume()
-        ClipWatch.onScreen = true
         BlindNotice.hide(this)
         ClipWatch.restartIfBlind() // on screen now, so Android can ask "Allow log access?"
         buildPerms()
@@ -306,8 +311,6 @@ class MainActivity : KitActivity() {
 
     override fun onPause() {
         super.onPause(); tick.removeCallbacksAndMessages(null)
-        ClipWatch.onScreen = false
-        ClipWatch.probe(2000) // check, once you've left, whether Android granted log access
     }
 
     private fun refresh() {
@@ -371,6 +374,7 @@ class HistoryActivity : KitActivity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         Link.ctx = applicationContext
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) // message/OTP text: keep out of recents previews and screenshots
         window.statusBarColor = BG; window.navigationBarColor = BG
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(12), dp(16), dp(32)) }
         val bar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -420,7 +424,7 @@ class HistoryActivity : KitActivity() {
             row.addView(text("✕", 17f, GREY).apply {
                 setPadding(dp(14), dp(6), dp(10), dp(6))
                 contentDescription = "Delete"
-                setOnClickListener { History.remove(kind, i); render() }
+                setOnClickListener { _ -> History.remove(kind, items.getJSONObject(i).optLong("t")); render() }
             })
             if (kind == "clip" && !it.optBoolean("img")) row.setOnClickListener { _ ->
                 getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("PhoneBridge", it.optString("text")))
