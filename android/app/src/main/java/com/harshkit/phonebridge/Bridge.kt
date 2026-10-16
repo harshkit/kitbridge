@@ -449,8 +449,10 @@ object ClipWatch {
         }, 250)
     }
 
-    fun a11yOn(c: Context) = Settings.Secure.getString(c.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
-        .orEmpty().contains("${c.packageName}/") 
+    /** True when the copy detector is actually running (not merely switched on in settings). */
+    fun a11yOn(c: Context) = c.getSystemService(android.view.accessibility.AccessibilityManager::class.java)
+        .getEnabledAccessibilityServiceList(android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        .any { it.resolveInfo.serviceInfo.packageName == c.packageName }
 
     fun restartIfBlind() { if (!healthy) { restartNow = true; proc?.destroy() } }
 
