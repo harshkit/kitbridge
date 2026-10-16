@@ -48,6 +48,7 @@ final class Conn {
 }
 
 let pb = NSPasteboard.general
+let run = UUID().uuidString.prefix(8) // unique notification ids: an aborted run never poisons the next
 func waitClip(_ s: String) -> Int { let t = Date()
     while pb.string(forType: .string) != s { precondition(Date().timeIntervalSince(t) < 2, "clipboard never became \(s)"); usleep(2000) }
     return Int(Date().timeIntervalSince(t) * 1000) }
@@ -55,7 +56,7 @@ func waitClip(_ s: String) -> Int { let t = Date()
 let c = Conn(); precondition(c.handshake(), "handshake failed")
 print("✓ X25519 handshake, fresh session key")
 c.send(["t": "hello", "name": "Fake S26"])
-c.send(["t": "notif", "id": "k1", "app": "Messages", "title": "AX-HDFCBK", "text": "Your OTP is 482913. Do not share", "cat": "msg"])
+c.send(["t": "notif", "id": "k1-\(run)", "app": "Messages", "title": "AX-HDFCBK", "text": "Your OTP is 482913. Do not share", "cat": "msg"])
 print("✓ OTP copied to Mac clipboard in \(waitClip("482913")) ms")
 c.send(["t": "clip", "text": "copied on phone ✓"])
 print("✓ phone→Mac clipboard in \(waitClip("copied on phone ✓")) ms")
@@ -63,7 +64,7 @@ pb.clearContents(); pb.setString("copied on mac ✓", forType: .string)
 var got: [String: Any]?
 repeat { got = c.recv() } while got != nil && got?["t"] as? String != "clip"
 precondition(got?["text"] as? String == "copied on mac ✓"); print("✓ Mac→phone clipboard, counter order checked")
-c.send(["t": "notif_rm", "id": "k1"])
+c.send(["t": "notif_rm", "id": "k1-\(run)"])
 c.raw(c.sent[2]) // replay the captured phone-clip frame
 usleep(300_000); print(c.closed() ? "✓ replayed frame rejected, connection dropped" : "✗ FAIL: replay accepted")
 
@@ -74,7 +75,9 @@ let r = Conn(); r.raw(c.sent[1]); usleep(300_000)
 print(r.closed() ? "✓ old-session frame on new connection rejected" : "✗ FAIL: cross-session replay accepted")
 
 // Replayed handshake: the Mac answers, but must still treat the peer as a stranger (1 KB cap).
-let h = Conn(); h.raw(c.hs); _ = h.frame(); h.raw(Data(count: 4096)); usleep(300_000)
+// Declare a 2 KB frame and send no body: only the 1 KB pre-auth cap can close this connection.
+let h = Conn(); h.raw(c.hs); _ = h.frame()
+var big = UInt32(2048).bigEndian; _ = withUnsafeBytes(of: &big) { write(h.fd, $0.baseAddress, 4) }; usleep(300_000)
 print(h.closed() ? "✓ replayed handshake stays untrusted (big frame refused)" : "✗ FAIL: replayed handshake lifted the limits")
 
 // Flood: 12 idle strangers hold connections open; the real phone must still get in.

@@ -43,7 +43,7 @@ It installs the Mac app (menu bar, starts at login), then pairs your phone over 
 - 🔐 **OTP auto-copy.** When a verification code arrives, it's already on your Mac's clipboard: just press **⌘V**. Works with bank SMS, Google, and "123 456"-style codes; ignores amounts like "₹1500".
 - 📋 **One clipboard.** Copy text, links or images on either device and paste on the other. Passwords copied from Mac password managers are never sent.
 - 🎛️ **You're in control.** Turn each piece on or off from the phone: calls, messages, other apps, sending copies, receiving copies.
-- ⚡ **Fast.** One persistent connection with no batching: an OTP reaches the Mac clipboard in ~25 ms; a typical round trip on home Wi-Fi is under 20 ms.
+- ⚡ **Fast.** One persistent connection with no batching: in tests an OTP lands on the Mac clipboard in about 20 ms, and a round trip on home Wi-Fi measured 17 ms.
 - 🔁 **Seamless.** The Mac app starts at login and relaunches itself if it ever crashes; the Android side runs as a system-managed notification listener, reconnects in milliseconds to a known Mac and falls back to Bonjour discovery if your Mac's address changes.
 
 ## How it works
@@ -67,6 +67,8 @@ Android deliberately makes a few of these things hard for apps. Here's what Phon
 | Android 15+ hides OTP text from notification listeners | PhoneBridge reads the **SMS itself** (RECEIVE_SMS), so the full code reaches your Mac. |
 | Samsung filters Wi-Fi multicast, hiding Bonjour | Takes a **multicast lock** during discovery, and remembers the Mac's address so it rarely needs discovery at all. |
 | Battery savers drop background connections | Setup adds PhoneBridge to the battery-optimisation allowlist. |
+
+**Permissions the Android app uses:** notification access, RECEIVE_SMS, READ_LOGS (granted over adb, for the clipboard), SYSTEM_ALERT_WINDOW (lets the invisible clipboard reader open from the background), QUERY_ALL_PACKAGES (to show app names on the Mac), INTERNET and Wi-Fi state (local network only).
 
 ## Security and privacy
 

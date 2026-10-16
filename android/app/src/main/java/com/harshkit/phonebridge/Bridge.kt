@@ -92,6 +92,7 @@ object Link {
             { if (connected) send(JSONObject().put("t", "ping").put("ts", System.nanoTime())) }, 1, 10, TimeUnit.SECONDS)
         thread(name = "link") {
             while (true) {
+                out = null; session = null // never look connected while a new attempt is under way
                 try {
                     if (key() == null) { status = "Not paired — run setup.sh on the Mac"; Thread.sleep(3000); continue }
                     if (!prefs.getBoolean("master", true)) { status = "Bridge off"; Thread.sleep(1000); continue }
@@ -178,7 +179,7 @@ object Link {
             val myPub = kp.public.encoded.takeLast(32).toByteArray()
             val hn = ByteArray(12).also(rnd::nextBytes)
             writeFrame(o, hn + aes(Cipher.ENCRYPT_MODE, key()!!, hn, myPub))
-            val f = readFrame(i)
+            val f = readFrame(i, max = 1024) // handshake replies are tiny; a spoofed "Mac" can't make us allocate 32 MB
             val macPub = aes(Cipher.DECRYPT_MODE, key()!!, f.copyOf(12), f.copyOfRange(12, f.size)) // throws if not our Mac
             if (macPub.size != 32) throw IOException("bad handshake")
             val ka = javax.crypto.KeyAgreement.getInstance("XDH")
@@ -221,9 +222,9 @@ object Link {
 
     private fun writeFrame(o: DataOutputStream, f: ByteArray) { o.writeInt(f.size); o.write(f); o.flush() }
 
-    private fun readFrame(i: DataInputStream): ByteArray {
+    private fun readFrame(i: DataInputStream, max: Int = MAX_FRAME): ByteArray {
         val n = i.readInt()
-        if (n !in 28..MAX_FRAME) throw IOException("bad frame")
+        if (n !in 28..max) throw IOException("bad frame")
         return ByteArray(n).also(i::readFully)
     }
 

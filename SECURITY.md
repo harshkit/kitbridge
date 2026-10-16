@@ -25,6 +25,7 @@ Only someone holding the pairing key can complete the handshake. The pairing key
 - **Someone with your unlocked Mac or phone.** The pairing key is stored in the Mac user's Application Support folder and in the app's private storage on Android.
 - **What adb can do.** Setup uses wireless debugging, and anyone you pair with adb can control the phone. Turn Wireless debugging off after setup if you don't use it otherwise.
 - **READ_LOGS is broad.** Android grants it as "read all device logs". PhoneBridge only starts `logcat` filtered to the `ClipboardService` tag and only looks for its own package name, but the permission itself is wider. Turn off "Send my copies to Mac" and revoke it (`adb shell pm revoke com.harshkit.phonebridge android.permission.READ_LOGS`) if you'd rather not grant it.
+- **A determined flood on your Wi-Fi.** Someone on the network who keeps opening connections fast enough can delay your phone from connecting. They still can't read or send anything.
 - **Who's on your Wi-Fi.** People on your network can see that a PhoneBridge connection exists, and when and how much data flows, but not the contents.
 
 ## Verifying

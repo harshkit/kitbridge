@@ -25,13 +25,19 @@ if [ -z "$(dev)" ]; then
     [ -n "$C" ] && adb connect "$C" >/dev/null && break; sleep 1
   done
 fi
-export ANDROID_SERIAL="$(dev)"
+if [ -z "${ANDROID_SERIAL:-}" ] && [ "$(adb devices | awk 'NR>1 && $2=="device"' | wc -l)" -gt 1 ]; then
+  adb devices -l; echo "More than one device: run again with ANDROID_SERIAL=<serial> ./setup.sh"; exit 1
+fi
+export ANDROID_SERIAL="${ANDROID_SERIAL:-$(dev)}"
 [ -n "$ANDROID_SERIAL" ] || { echo "Phone not connected. Check both are on the same Wi-Fi and try again."; exit 1; }
 echo "Phone: $(adb shell getprop ro.product.model) (Android $(adb shell getprop ro.build.version.release))"
 
 APK="${1:-android/app/build/outputs/apk/release/app-release.apk}"
 [ -f "$APK" ] || (cd android && ./gradlew assembleRelease -q)
-adb install -r "$APK" 2>/dev/null || { adb uninstall "$P" >/dev/null; adb install "$APK"; } # signer changed: reinstall
+if ! adb install -r "$APK" 2>/dev/null; then
+  echo "The installed PhoneBridge was signed differently; reinstalling (its settings reset, pairing is redone below)."
+  adb uninstall "$P" >/dev/null; adb install "$APK"
+fi
 
 ok() { "$@" >/dev/null 2>&1 && echo "  ✓ ${*: -1}" || echo "  · skipped: ${*: -2}"; }
 ok adb shell cmd notification allow_listener "$P/$P.BridgeService"        # notifications, calls, messages

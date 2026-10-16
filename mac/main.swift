@@ -181,6 +181,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
             guard let id = j["id"] as? String else { return }
             let app = j["app"] as? String ?? "", title = j["title"] as? String ?? "", text = j["text"] as? String ?? ""
             guard seen[id] != title + text else { return } // Android re-posts the same notification often
+            if seen.count > 500 { seen.removeAll() } // bounded: ids are unique per SMS
             seen[id] = title + text
             let content = UNMutableNotificationContent()
             content.title = title.isEmpty ? app : title
@@ -190,6 +191,8 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
             if j["cat"] as? String == "call" { content.interruptionLevel = .timeSensitive }
             if let code = findCode(title + " " + text) {
                 setClip(code)
+                pb.setString("", forType: .init("org.nspasteboard.TransientType")) // clipboard managers: don't keep codes in history
+                lastChange = pb.changeCount
                 content.subtitle = "Code \(code) copied — press ⌘V"
             }
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
