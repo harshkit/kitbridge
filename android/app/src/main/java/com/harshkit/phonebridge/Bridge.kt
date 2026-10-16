@@ -249,6 +249,7 @@ object Link {
         if (j.optString("t") != "clip" || !on("clip_in")) return
         bump("clip")
         val cm = ctx.getSystemService(ClipboardManager::class.java)
+        History.add("clip", JSONObject().put("dir", "in").put("img", !j.has("text")).put("text", if (j.has("text")) j.getString("text") else "Photo"))
         val clip = if (j.has("text")) {
             lastClip = j.getString("text")
             ClipData.newPlainText("Mac", lastClip)
@@ -319,6 +320,7 @@ class BridgeService : NotificationListenerService() {
         val app = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
         if (live) {
             Link.bump(if (cat == "call") "calls" else if (cat == "msg") "msgs" else "apps")
+            if (cat != "app") History.add(if (cat == "call") "calls" else "msgs", JSONObject().put("app", app).put("title", title).put("text", text))
             android.util.Log.i("PhoneBridge", "Forwarding $pkg ($cat)")
         }
         val reply = replyAction(n)
@@ -458,6 +460,7 @@ object ClipWatch {
         val bytes = readCapped(c, uri, 20 * 1024 * 1024) ?: return false
         Link.bump("clip")
         Link.send(JSONObject().put("t", "clip").put("img", Base64.encodeToString(bytes, Base64.NO_WRAP)))
+        History.add("clip", JSONObject().put("dir", "out").put("img", true).put("text", "Photo"))
         android.util.Log.i("PhoneBridge", "Clipboard to Mac: image")
         return true
     }
@@ -489,6 +492,7 @@ object ClipWatch {
             Link.lastClip = t
             Link.bump("clip")
             Link.send(JSONObject().put("t", "clip").put("text", t))
+            History.add("clip", JSONObject().put("dir", "out").put("text", t))
             android.util.Log.i("PhoneBridge", "Clipboard to Mac: text")
         }
     }
@@ -635,4 +639,17 @@ object Replies {
             true
         } catch (e: Exception) { android.util.Log.w("PhoneBridge", "Reply failed: ${e.javaClass.simpleName}"); false }
     }
+}
+
+/** Last 20 calls, messages and clipboard items, in the app's private storage on the phone only. */
+object History {
+    private const val MAX = 20
+    @Synchronized fun add(kind: String, item: JSONObject) = runCatching {
+        val old = list(kind); val next = org.json.JSONArray().put(item.put("t", System.currentTimeMillis()))
+        for (i in 0 until minOf(old.length(), MAX - 1)) next.put(old.get(i))
+        Link.prefs.edit().putString("h_$kind", next.toString()).apply()
+    }
+    @Synchronized fun list(kind: String) = runCatching { org.json.JSONArray(Link.prefs.getString("h_$kind", "[]")) }.getOrDefault(org.json.JSONArray())
+    @Synchronized fun remove(kind: String, index: Int) { val a = list(kind); a.remove(index); Link.prefs.edit().putString("h_$kind", a.toString()).apply() }
+    @Synchronized fun clear(kind: String) = Link.prefs.edit().remove("h_$kind").apply()
 }

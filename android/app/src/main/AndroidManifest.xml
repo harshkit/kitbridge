@@ -30,6 +30,11 @@
         </activity>
 
         <activity
+            android:name=".HistoryActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <activity
             android:name=".PairActivity"
             android:exported="true"
             android:permission="android.permission.DUMP"

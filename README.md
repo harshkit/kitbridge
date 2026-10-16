@@ -44,6 +44,7 @@ It installs the Mac app (menu bar, starts at login), then pairs your phone over 
 - 🔐 **OTP auto-copy.** When a verification code arrives, it's already on your Mac's clipboard: just press **⌘V**. Works with bank SMS, Google, and "123 456"-style codes; ignores amounts like "₹1500".
 - 📋 **One clipboard.** Copy text, links or images on either device and paste on the other. HDR photos from your phone paste in true colour, upright and full size. Passwords copied in password managers (on either side) are never sent.
 - 📤 **Send to Mac.** Share any photo or text to **Send to Mac**, or tap the **Send to Mac** Quick Settings tile to send whatever you just copied.
+- 🕘 **History.** Tap Calls, Messages or Clipboard in the phone app to see the last 20, copy a past clip again, delete one, or clear all. Kept only on the phone.
 - 🎛️ **You're in control.** Turn each piece on or off from the phone: calls, messages, other apps, sending copies, receiving copies.
 - ⚡ **Fast.** One persistent connection with no batching: in tests an OTP lands on the Mac clipboard in about 20 ms, and a round trip on home Wi-Fi measured 17 ms.
 - 🔁 **Seamless.** The Mac app starts at login and relaunches itself if it ever crashes; the Android side runs as a system-managed notification listener, keeps its link while the phone is locked, reconnects in milliseconds to a known Mac and, after any drop, re-sends what you missed.

@@ -136,7 +136,72 @@ class PairActivity : Activity() {
     }
 }
 
-class MainActivity : Activity() {
+/** Shared look for PhoneBridge's screens: dark iOS cards, type scale, rows, switches. */
+abstract class KitActivity : Activity() {
+    protected val d get() = resources.displayMetrics.density
+    protected fun dp(v: Number) = (v.toFloat() * d).toInt()
+
+    // ---- small view kit ----
+
+    protected fun text(s: String, sp: Float, color: Int, tf: Typeface = Typeface.DEFAULT) =
+        TextView(this).apply { text = s; textSize = sp; setTextColor(color); typeface = tf; includeFontPadding = false; letterSpacing = if (sp >= 22) -0.01f else 0f }
+
+    /** Big number + small grey unit, the Fitness "320/400 CAL" look. */
+    protected fun value(big: String, unit: String) = SpannableStringBuilder(big).apply {
+        val s = length; append(unit)
+        setSpan(RelativeSizeSpan(0.6f), s, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        setSpan(ForegroundColorSpan(GREY), s, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+
+    protected fun card() = LinearLayout(this).apply {
+        background = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(CARD) }
+        setPadding(dp(18), dp(18), dp(18), dp(18))
+    }
+
+    protected fun tile(parent: LinearLayout, label: String, color: Int, endMargin: Int, onClick: () -> Unit = {}): TextView {
+        val t = card().apply { orientation = LinearLayout.VERTICAL; setOnClickListener { onClick() } }
+        t.addView(text(label, 15f, color, BOLD), lp(bottom = 8))
+        val v = text("—", 28f, Color.WHITE, HEAVY).apply { maxLines = 1 }
+        t.addView(v)
+        parent.addView(t, LinearLayout.LayoutParams(0, -1, 1f).apply { marginEnd = dp(endMargin) })
+        return v
+    }
+
+    protected fun row(label: String, color: Int, icon: Int, last: Boolean, trailing: (LinearLayout) -> Unit): View {
+        val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val r = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(11), dp(16), dp(11)) }
+        val sq = FrameLayout(this).apply { background = GradientDrawable().apply { cornerRadius = dp(8).toFloat(); setColor(color) } }
+        sq.addView(ImageView(this).apply { setImageResource(icon); imageTintList = ColorStateList.valueOf(Color.WHITE) },
+            FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+        r.addView(sq, LinearLayout.LayoutParams(dp(30), dp(30)))
+        r.addView(text(label, 17f, Color.WHITE), LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(14) })
+        trailing(r)
+        wrap.addView(r)
+        if (!last) wrap.addView(View(this).apply { setBackgroundColor(SEP) },
+            LinearLayout.LayoutParams(-1, maxOf(1, dp(0.5))).apply { marginStart = dp(60) })
+        return wrap
+    }
+
+    /** iOS switch: 51×31 pill track, white knob, system green when on. */
+    protected fun iosSwitch(on: Boolean, changed: (Boolean) -> Unit) = Switch(this).apply {
+        val checked = intArrayOf(android.R.attr.state_checked)
+        trackDrawable = StateListDrawable().apply {
+            addState(checked, GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(IOS_GREEN); setSize(dp(51), dp(31)) })
+            addState(intArrayOf(), GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0xFF39393D.toInt()); setSize(dp(51), dp(31)) })
+        }
+        thumbDrawable = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL; setColor(Color.WHITE); setSize(dp(31), dp(31)); setStroke(dp(2), Color.TRANSPARENT)
+        }
+        trackTintList = null; thumbTintList = null; showText = false; switchMinWidth = dp(51)
+        isChecked = on
+        setOnCheckedChangeListener { v, b -> v.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK); changed(b) }
+    }
+
+    protected fun lp(top: Int = 0, bottom: Int = 0) =
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(top); bottomMargin = dp(bottom) }
+}
+
+class MainActivity : KitActivity() {
     private val tick = Handler(Looper.getMainLooper())
     private lateinit var bridge: BridgeView
     private lateinit var heroTitle: TextView
@@ -144,9 +209,6 @@ class MainActivity : Activity() {
     private lateinit var pill: TextView
     private lateinit var stats: List<TextView>
     private lateinit var perms: LinearLayout
-    private val d get() = resources.displayMetrics.density
-    private fun dp(v: Number) = (v.toFloat() * d).toInt()
-
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         Link.ctx = applicationContext
@@ -178,8 +240,10 @@ class MainActivity : Activity() {
         // Today: three counters with big numbers.
         col.addView(text("Today", 22f, Color.WHITE, BOLD), lp(bottom = 8))
         val tiles = LinearLayout(this)
-        stats = listOf("Calls" to PINK, "Messages" to GREEN, "Clipboard" to CYAN).mapIndexed { i, (label, c) ->
-            tile(tiles, label, c, endMargin = if (i < 2) 10 else 0)
+        stats = listOf(Triple("Calls", PINK, "calls"), Triple("Messages", GREEN, "msgs"), Triple("Clipboard", CYAN, "clip")).mapIndexed { i, (label, c, kind) ->
+            tile(tiles, label, c, endMargin = if (i < 2) 10 else 0) {
+                startActivity(Intent(this, HistoryActivity::class.java).putExtra("kind", kind))
+            }
         }
         col.addView(tiles, lp(bottom = 26))
 
@@ -297,62 +361,75 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(c: Int, p: Array<String>, r: IntArray) = buildPerms()
 
-    // ---- small view kit ----
+}
 
-    private fun text(s: String, sp: Float, color: Int, tf: Typeface = Typeface.DEFAULT) =
-        TextView(this).apply { text = s; textSize = sp; setTextColor(color); typeface = tf; includeFontPadding = false; letterSpacing = if (sp >= 22) -0.01f else 0f }
+/** Last 20 calls, messages or clipboard items: tap a copy to copy it again, × to delete one, or clear all. */
+class HistoryActivity : KitActivity() {
+    private lateinit var list: LinearLayout
+    private val kind get() = intent.getStringExtra("kind") ?: "msgs"
 
-    /** Big number + small grey unit, the Fitness "320/400 CAL" look. */
-    private fun value(big: String, unit: String) = SpannableStringBuilder(big).apply {
-        val s = length; append(unit)
-        setSpan(RelativeSizeSpan(0.6f), s, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        setSpan(ForegroundColorSpan(GREY), s, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    override fun onCreate(b: Bundle?) {
+        super.onCreate(b)
+        Link.ctx = applicationContext
+        window.statusBarColor = BG; window.navigationBarColor = BG
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(12), dp(16), dp(32)) }
+        val bar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        bar.addView(text("‹ PhoneBridge", 17f, BLUE).apply { setPadding(0, dp(8), dp(8), dp(8)); setOnClickListener { finish() } },
+            LinearLayout.LayoutParams(0, -2, 1f))
+        bar.addView(text("Clear all", 17f, PINK).apply {
+            setPadding(dp(8), dp(8), 0, dp(8))
+            setOnClickListener {
+                android.app.AlertDialog.Builder(this@HistoryActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle("Clear all ${title()}?").setMessage("This deletes the history from this phone.")
+                    .setPositiveButton("Clear") { _, _ -> History.clear(kind); render() }
+                    .setNegativeButton("Cancel", null).show()
+            }
+        })
+        col.addView(bar)
+        col.addView(text(title(), 34f, Color.WHITE, HEAVY), lp(top = 6, bottom = 4))
+        col.addView(text("Last 20 · kept only on this phone", 14f, GREY), lp(bottom = 16))
+        list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(list)
+        setContentView(ScrollView(this).apply {
+            setBackgroundColor(BG); isVerticalScrollBarEnabled = false; clipToPadding = true; addView(col)
+            setOnApplyWindowInsetsListener { v, ins ->
+                val bars = ins.getInsets(android.view.WindowInsets.Type.systemBars())
+                v.setPadding(0, bars.top, 0, 0); col.setPadding(dp(16), dp(12), dp(16), bars.bottom + dp(32)); ins
+            }
+        })
+        render()
     }
 
-    private fun card() = LinearLayout(this).apply {
-        background = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(CARD) }
-        setPadding(dp(18), dp(18), dp(18), dp(18))
-    }
+    private fun title() = mapOf("calls" to "Calls", "msgs" to "Messages", "clip" to "Clipboard")[kind] ?: "History"
 
-    private fun tile(parent: LinearLayout, label: String, color: Int, endMargin: Int): TextView {
-        val t = card().apply { orientation = LinearLayout.VERTICAL }
-        t.addView(text(label, 15f, color, BOLD), lp(bottom = 8))
-        val v = text("—", 28f, Color.WHITE, HEAVY).apply { maxLines = 1 }
-        t.addView(v)
-        parent.addView(t, LinearLayout.LayoutParams(0, -1, 1f).apply { marginEnd = dp(endMargin) })
-        return v
-    }
-
-    private fun row(label: String, color: Int, icon: Int, last: Boolean, trailing: (LinearLayout) -> Unit): View {
-        val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val r = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(11), dp(16), dp(11)) }
-        val sq = FrameLayout(this).apply { background = GradientDrawable().apply { cornerRadius = dp(8).toFloat(); setColor(color) } }
-        sq.addView(ImageView(this).apply { setImageResource(icon); imageTintList = ColorStateList.valueOf(Color.WHITE) },
-            FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
-        r.addView(sq, LinearLayout.LayoutParams(dp(30), dp(30)))
-        r.addView(text(label, 17f, Color.WHITE), LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(14) })
-        trailing(r)
-        wrap.addView(r)
-        if (!last) wrap.addView(View(this).apply { setBackgroundColor(SEP) },
-            LinearLayout.LayoutParams(-1, maxOf(1, dp(0.5))).apply { marginStart = dp(60) })
-        return wrap
-    }
-
-    /** iOS switch: 51×31 pill track, white knob, system green when on. */
-    private fun iosSwitch(on: Boolean, changed: (Boolean) -> Unit) = Switch(this).apply {
-        val checked = intArrayOf(android.R.attr.state_checked)
-        trackDrawable = StateListDrawable().apply {
-            addState(checked, GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(IOS_GREEN); setSize(dp(51), dp(31)) })
-            addState(intArrayOf(), GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0xFF39393D.toInt()); setSize(dp(51), dp(31)) })
+    private fun render() {
+        list.removeAllViews()
+        val items = History.list(kind)
+        if (items.length() == 0) { list.addView(text("Nothing yet.", 17f, GREY), lp(top = 24)); return }
+        val group = card().apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, 0) }
+        for (i in 0 until items.length()) {
+            val it = items.getJSONObject(i)
+            val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(12), dp(8), dp(12)) }
+            val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            val head = if (kind == "clip") (if (it.optString("dir") == "out") "To Mac" else "From Mac") else
+                listOf(it.optString("title"), it.optString("app")).filter { s -> s.isNotEmpty() }.joinToString(" · ")
+            val time = android.text.format.DateUtils.getRelativeTimeSpanString(it.optLong("t"), System.currentTimeMillis(), 60_000L)
+            body.addView(text("$head  ·  $time", 13f, GREY, BOLD))
+            body.addView(text(it.optString("text"), 16f, Color.WHITE).apply { maxLines = 3; ellipsize = android.text.TextUtils.TruncateAt.END }, lp(top = 4))
+            row.addView(body, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(text("✕", 17f, GREY).apply {
+                setPadding(dp(14), dp(6), dp(10), dp(6))
+                contentDescription = "Delete"
+                setOnClickListener { History.remove(kind, i); render() }
+            })
+            if (kind == "clip" && !it.optBoolean("img")) row.setOnClickListener { _ ->
+                getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("PhoneBridge", it.optString("text")))
+                Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+            }
+            group.addView(row)
+            if (i < items.length() - 1) group.addView(View(this).apply { setBackgroundColor(SEP) },
+                LinearLayout.LayoutParams(-1, maxOf(1, dp(0.5))).apply { marginStart = dp(16) })
         }
-        thumbDrawable = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL; setColor(Color.WHITE); setSize(dp(31), dp(31)); setStroke(dp(2), Color.TRANSPARENT)
-        }
-        trackTintList = null; thumbTintList = null; showText = false; switchMinWidth = dp(51)
-        isChecked = on
-        setOnCheckedChangeListener { v, b -> v.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK); changed(b) }
+        list.addView(group)
     }
-
-    private fun lp(top: Int = 0, bottom: Int = 0) =
-        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(top); bottomMargin = dp(bottom) }
 }
