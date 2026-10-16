@@ -91,6 +91,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
             seen = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
         }
         try? JSONEncoder().encode(seen).write(to: seenFile, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: seenFile.path) // owner-only, like key.hex
     }
     let pb = NSPasteboard.general
     lazy var lastChange = pb.changeCount
