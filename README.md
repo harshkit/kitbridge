@@ -39,12 +39,14 @@ It installs the Mac app (menu bar, starts at login), then pairs your phone over 
 ## Features
 
 - 📞 **Calls on your Mac.** Incoming calls appear as time-sensitive Mac alerts, showing the caller the way your phone does.
-- 💬 **Messages and SMS.** WhatsApp, Messages, Telegram and everything else your phone shows, as native macOS notifications. Swipe one away on the phone and it disappears from the Mac.
+- 💬 **Messages and SMS.** WhatsApp, Messages, Telegram and everything else your phone shows, as native macOS notifications with the sender's photo and the app's badge. Swipe one away on the phone and it disappears from the Mac.
+- ↩️ **Reply from your Mac.** Hover a WhatsApp, SMS or Telegram alert, click **Reply**, type, send. The phone answers through the app's own reply button, so it's a real reply in the chat.
 - 🔐 **OTP auto-copy.** When a verification code arrives, it's already on your Mac's clipboard: just press **⌘V**. Works with bank SMS, Google, and "123 456"-style codes; ignores amounts like "₹1500".
-- 📋 **One clipboard.** Copy text, links or images on either device and paste on the other. Passwords copied from Mac password managers are never sent.
+- 📋 **One clipboard.** Copy text, links or images on either device and paste on the other. HDR photos from your phone paste in true colour, upright and full size. Passwords copied in password managers (on either side) are never sent.
+- 📤 **Send to Mac.** Share any photo or text to **Send to Mac**, or tap the **Send to Mac** Quick Settings tile to send whatever you just copied.
 - 🎛️ **You're in control.** Turn each piece on or off from the phone: calls, messages, other apps, sending copies, receiving copies.
 - ⚡ **Fast.** One persistent connection with no batching: in tests an OTP lands on the Mac clipboard in about 20 ms, and a round trip on home Wi-Fi measured 17 ms.
-- 🔁 **Seamless.** The Mac app starts at login and relaunches itself if it ever crashes; the Android side runs as a system-managed notification listener, reconnects in milliseconds to a known Mac and falls back to Bonjour discovery if your Mac's address changes.
+- 🔁 **Seamless.** The Mac app starts at login and relaunches itself if it ever crashes; the Android side runs as a system-managed notification listener, keeps its link while the phone is locked, reconnects in milliseconds to a known Mac and, after any drop, re-sends what you missed.
 
 ## How it works
 
@@ -66,7 +68,9 @@ Android deliberately makes a few of these things hard for apps. Here's what Phon
 | Android 10+ blocks reading the clipboard in the background | The system logs `Denying clipboard access to <app>` whenever the clipboard changes. With **READ_LOGS** granted over adb, PhoneBridge watches for that one line (filtered to `ClipboardService` only), shows a 1-pixel invisible window for a few milliseconds to gain focus, reads the clip and closes. KDE Connect uses the same technique. |
 | Android 15+ hides OTP text from notification listeners | PhoneBridge reads the **SMS itself** (RECEIVE_SMS), so the full code reaches your Mac. |
 | Samsung filters Wi-Fi multicast, hiding Bonjour | Takes a **multicast lock** during discovery, and remembers the Mac's address so it rarely needs discovery at all. |
-| Battery savers drop background connections | Setup adds PhoneBridge to the battery-optimisation allowlist. |
+| Battery savers drop background connections | Setup adds PhoneBridge to the battery-optimisation allowlist; the Mac pings every 10 s and the phone re-sends anything missed after a reconnect. |
+| Log access is granted only on screen (Android 13+) | After an update or reboot, open PhoneBridge once and tap **Allow** when asked. The Send to Mac tile and share option work without it. |
+| HDR photos look washed out on a Mac clipboard | The Mac converts them with Apple's ImageIO to a standard-range PNG (keeping the colour profile and rotation) and also keeps the original. |
 
 **Permissions the Android app uses:** notification access, RECEIVE_SMS, READ_LOGS (granted over adb, for the clipboard), SYSTEM_ALERT_WINDOW (lets the invisible clipboard reader open from the background), QUERY_ALL_PACKAGES (to show app names on the Mac), INTERNET and Wi-Fi state (local network only).
 
@@ -103,8 +107,8 @@ Install the Android build tools with `brew install openjdk@17 && brew install --
 
 ## Roadmap
 
-- Reply to messages from the Mac notification
 - Drop files between phone and Mac (AirDrop-style)
+- Answer or decline calls from the Mac
 - One-click hotspot from the Mac menu bar
 
 Ideas and bug reports are welcome in [Issues](https://github.com/harshkit/phonebridge/issues).

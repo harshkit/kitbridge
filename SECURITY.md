@@ -20,6 +20,10 @@ Only someone holding the pairing key can complete the handshake. The pairing key
 
 **Hardening.** A connection is trusted only after its first valid encrypted message, so even a replayed handshake stays a stranger. Strangers get 5 seconds and 1 KB frames, and at most 8 can be pending at once. The pairing command copied from the Mac menu is marked as a concealed clip, so clipboard managers and PhoneBridge's own sync skip it. Clipboard items that password managers mark as secret (concealed on macOS, sensitive on Android) never leave the device they were copied on.
 
+**Replies.** The Mac can only answer notifications the phone is sharing with it (your switches apply), and only through the app's own Reply action, the same one in your notification shade.
+
+**Send to Mac.** Any app can open the share target, so it accepts only shared `content://` items (never PhoneBridge's own files), reads at most 20 MB, and asks you to tap **Send** first, which another app can't do for you.
+
 ## What PhoneBridge does not protect against
 
 - **Someone with your unlocked Mac or phone.** The pairing key is stored in the Mac user's Application Support folder and in the app's private storage on Android.
