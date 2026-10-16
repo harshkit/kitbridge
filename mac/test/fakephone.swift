@@ -76,3 +76,9 @@ print(r.closed() ? "✓ old-session frame on new connection rejected" : "✗ FAI
 // Replayed handshake: the Mac answers, but must still treat the peer as a stranger (1 KB cap).
 let h = Conn(); h.raw(c.hs); _ = h.frame(); h.raw(Data(count: 4096)); usleep(300_000)
 print(h.closed() ? "✓ replayed handshake stays untrusted (big frame refused)" : "✗ FAIL: replayed handshake lifted the limits")
+
+// Flood: 12 idle strangers hold connections open; the real phone must still get in.
+let flood = (0..<12).map { _ in Conn() }
+usleep(200_000)
+let f = Conn(); print(f.handshake() ? "✓ phone still connects during a connection flood" : "✗ FAIL: flood locked the phone out")
+_ = flood
