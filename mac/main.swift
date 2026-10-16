@@ -108,7 +108,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         listener.start(queue: .main)
 
         Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [unowned self] _ in pollClipboard() }
-        Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [unowned self] _ in send(["t": "ping"]) }
+        Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [unowned self] _ in send(["t": "ping"]) } // keeps a locked phone's link alive (it gives up after 25 s of silence)
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [unowned self] _ in checkAlerts() } // notices when you turn alerts on
         refresh()
     }

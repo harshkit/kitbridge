@@ -17,8 +17,8 @@ cat > "$A/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>PhoneBridge</string>
   <key>CFBundleIconFile</key><string>PhoneBridge</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>1.1.0</string>
+  <key>CFBundleVersion</key><string>2</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSLocalNetworkUsageDescription</key><string>PhoneBridge talks to your phone on this Wi-Fi.</string>
