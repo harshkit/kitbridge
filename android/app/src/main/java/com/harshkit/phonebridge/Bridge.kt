@@ -292,18 +292,24 @@ class BridgeService : NotificationListenerService() {
             ?.forEach { runCatching { forward(it, live = false) } }
     }
 
-    private fun forward(sbn: StatusBarNotification, live: Boolean) {
+    /** The category if this notification may go to the Mac (your switches allow it), else null. */
+    fun shareable(sbn: StatusBarNotification): String? {
         val n = sbn.notification
-        if (sbn.packageName == packageName || n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
-        val e = n.extras
+        if (sbn.packageName == packageName || n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return null
         val cat = when {
             n.category == Notification.CATEGORY_CALL -> "call"
-            n.category == Notification.CATEGORY_MESSAGE || e.containsKey(Notification.EXTRA_MESSAGES) -> "msg" // WhatsApp chats
+            n.category == Notification.CATEGORY_MESSAGE || n.extras.containsKey(Notification.EXTRA_MESSAGES) -> "msg" // WhatsApp chats
             else -> "app"
         }
-        if (sbn.isOngoing && cat != "call") return
+        if (sbn.isOngoing && cat != "call") return null
+        return cat.takeIf { Link.on(mapOf("call" to "calls", "msg" to "msgs", "app" to "apps").getValue(it)) }
+    }
+
+    private fun forward(sbn: StatusBarNotification, live: Boolean) {
+        val n = sbn.notification
+        val e = n.extras
+        val cat = shareable(sbn) ?: return
         if (live && Replies.justReplied(sbn.key)) return // the app re-posts the thread with your own reply in it
-        if (!Link.on(mapOf("call" to "calls", "msg" to "msgs", "app" to "apps").getValue(cat))) return
         val title = e.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
         val text = (e.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: e.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
         if (title.isEmpty() && text.isEmpty()) return
@@ -537,8 +543,10 @@ object Replies {
     fun send(c: Context, key: String, text: String): Boolean {
         // Remembered action, or (after a restart/update wiped memory) the live notification's own Reply action.
         val a = synchronized(this) { actions[key] }
-            ?: runCatching { BridgeService.instance?.activeNotifications?.firstOrNull { it.key == key } }.getOrNull()
-                ?.notification?.let(BridgeService::replyAction)
+            ?: runCatching {
+                val svc = BridgeService.instance
+                svc?.activeNotifications?.firstOrNull { it.key == key && svc.shareable(it) != null } // only what you share with the Mac
+            }.getOrNull()?.notification?.let(BridgeService::replyAction)
             ?: return false.also { android.util.Log.w("PhoneBridge", "Reply failed: notification no longer on the phone") }
         return try {
             val inputs = a.remoteInputs
