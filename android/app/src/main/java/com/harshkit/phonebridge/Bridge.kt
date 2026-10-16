@@ -366,12 +366,22 @@ object ClipWatch {
 
     /** Manual send (Quick Settings tile, share sheet): an image URI or text, straight to the Mac. */
     fun sendImage(c: Context, uri: Uri): Boolean {
-        val bytes = c.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return false
-        if (bytes.size > 20 * 1024 * 1024) return false
+        val bytes = readCapped(c, uri, 20 * 1024 * 1024) ?: return false
         Link.bump("clip")
         Link.send(JSONObject().put("t", "clip").put("img", Base64.encodeToString(bytes, Base64.NO_WRAP)))
         android.util.Log.i("PhoneBridge", "Clipboard to Mac: image")
         return true
+    }
+
+    /** Reads at most [max] bytes; bigger files are refused without ever being held in memory. */
+    private fun readCapped(c: Context, uri: Uri, max: Int): ByteArray? = c.contentResolver.openInputStream(uri)?.use { input ->
+        val out = java.io.ByteArrayOutputStream(); val buf = ByteArray(64 * 1024)
+        while (true) {
+            val n = input.read(buf); if (n < 0) break
+            if (out.size() + n > max) return null
+            out.write(buf, 0, n)
+        }
+        out.toByteArray()
     }
 
     fun push(c: Context) {
@@ -418,13 +428,28 @@ class ClipTile : android.service.quicksettings.TileService() {
     }
 }
 
-/** Share → "Send to Mac" from any app: a photo or text goes straight to the Mac clipboard. */
+/**
+ * Share → "Send to Mac" from any app. Any app can open this screen, so the input is untrusted:
+ * only shared content:// items (never our own files or file:// paths), and you confirm with a tap,
+ * which another app can't do for you.
+ */
 class SendActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         Link.ctx = applicationContext
         val uri = intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            ?.takeIf { it.scheme == "content" && it.authority != "com.harshkit.phonebridge.img" }
         val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+        if (uri == null && text.isNullOrEmpty()) return finish()
+        android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(if (uri != null) "Send this image to your Mac?" else "Send this text to your Mac?")
+            .setPositiveButton("Send") { _, _ -> send(uri, text) }
+            .setNegativeButton("Cancel") { _, _ -> finish() }
+            .setOnCancelListener { finish() }
+            .show()
+    }
+
+    private fun send(uri: Uri?, text: String?) {
         val ok = Link.connected && runCatching {
             when {
                 uri != null -> ClipWatch.sendImage(this, uri)
