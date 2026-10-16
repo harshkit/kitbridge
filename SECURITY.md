@@ -22,6 +22,8 @@ Only someone holding the pairing key can complete the handshake. The pairing key
 
 **Replies.** The Mac can only answer notifications the phone is sharing with it (your switches apply), and only through the app's own Reply action, the same one in your notification shade.
 
+**Copy detector (Accessibility).** Optional and off until you switch it on. Its configuration (`res/xml/copy_watcher.xml`) receives only three event types (taps, pop-ups, window changes) with `canRetrieveWindowContent="false"`, so it can't read screen contents. It looks only at the event's own label to spot "Copy" / "Copied" / the clipboard pop-up, stores nothing, sends nothing itself, and logs only the source app's package name. Turning it off in Accessibility settings turns automatic copy back to the log-watcher fallback.
+
 **Send to Mac.** Any app can open the share target, so it accepts only shared `content://` items (never PhoneBridge's own files), reads at most 20 MB, and asks you to tap **Send** first, which another app can't do for you.
 
 ## What PhoneBridge does not protect against

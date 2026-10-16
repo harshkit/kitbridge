@@ -50,4 +50,7 @@ ok adb shell appops set "$P" RUN_ANY_IN_BACKGROUND allow
 ok adb shell dumpsys deviceidle whitelist +"$P"                             # no battery-saver disconnects
 MAC_IP=$(ipconfig getifaddr en0 || ipconfig getifaddr en1 || true)
 adb shell am start -n "$P/.PairActivity" --es key "$(cat "$KEY")" --es host "$MAC_IP" >/dev/null
-echo "Paired. If the phone asks to allow log access, tap Allow — that's the clipboard sync."
+echo "Paired."
+echo "For automatic copy from the phone: Settings → Accessibility → Installed apps → PhoneBridge: copy to Mac → On"
+echo "  (greyed out? Settings → Apps → PhoneBridge → ⋮ → Allow restricted settings, then try again)"
+adb shell am start -a android.settings.ACCESSIBILITY_SETTINGS >/dev/null 2>&1 || true

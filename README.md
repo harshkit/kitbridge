@@ -32,7 +32,7 @@ On your Mac:
 curl -fsSL https://raw.githubusercontent.com/harshkit/phonebridge/main/install.sh | bash
 ```
 
-It installs the Mac app (menu bar, starts at login), then pairs your phone over Wi-Fi. On the phone you'll need **Settings → Developer options → Wireless debugging → Pair device with pairing code** once. The installer asks for the code shown there. After that, there's nothing to run: both sides connect on their own whenever they're on the same Wi-Fi.
+It installs the Mac app (menu bar, starts at login), then pairs your phone over Wi-Fi. For automatic copy from the phone, finally switch on **Settings → Accessibility → Installed apps → PhoneBridge: copy to Mac** (if Samsung greys it out: **Settings → Apps → PhoneBridge → ⋮ → Allow restricted settings**). On the phone you'll need **Settings → Developer options → Wireless debugging → Pair device with pairing code** once. The installer asks for the code shown there. After that, there's nothing to run: both sides connect on their own whenever they're on the same Wi-Fi.
 
 **Requirements:** a Mac on macOS 14 or later, an Android phone on Android 13 or later, both on the same Wi-Fi network. Tested on a Samsung Galaxy S26 Ultra (Android 17) with a MacBook Air.
 
@@ -66,14 +66,14 @@ Android deliberately makes a few of these things hard for apps. Here's what Phon
 | Android limit | What PhoneBridge does |
 |---|---|
 | Apps can't read other apps' notifications | Uses the official **notification access** permission, granted by setup (sideloaded apps can't flip it on themselves on Android 13+). |
-| Android 10+ blocks reading the clipboard in the background | The system logs `Denying clipboard access to <app>` whenever the clipboard changes. With **READ_LOGS** granted over adb, PhoneBridge watches for that one line (filtered to `ClipboardService` only), shows a 1-pixel invisible window for a few milliseconds to gain focus, reads the clip and closes. KDE Connect uses the same technique. |
+| Android 10+ blocks reading the clipboard in the background | A narrow **Accessibility** detector notices when you copy (a "Copy" tap or the system's "Copied" pop-up; it can't read your screen), then PhoneBridge shows an invisible window for a few milliseconds to gain focus, reads the clip and closes. You switch it on once and it survives reboots and updates. Without it, a fallback watches the system's `Denying clipboard access` log line (READ_LOGS, the technique KDE Connect uses), which Android 13+ asks you to re-allow after each restart. |
 | Android 15+ hides OTP text from notification listeners | PhoneBridge reads the **SMS itself** (RECEIVE_SMS), so the full code reaches your Mac. |
 | Samsung filters Wi-Fi multicast, hiding Bonjour | Takes a **multicast lock** during discovery, and remembers the Mac's address so it rarely needs discovery at all. |
 | Battery savers drop background connections | Setup adds PhoneBridge to the battery-optimisation allowlist; the Mac pings every 10 s and the phone re-sends anything missed after a reconnect. |
-| Log access is granted only on screen (Android 13+) | After an update or reboot, open PhoneBridge once and tap **Allow** when asked. The Send to Mac tile and share option work without it. |
+| Log access is granted only on screen (Android 13+) | Not needed when the Accessibility detector is on. Otherwise PhoneBridge shows a "Turn on copy to Mac" reminder after a reboot or update. The Send to Mac tile and share option never need either. |
 | HDR photos look washed out on a Mac clipboard | The Mac converts them with Apple's ImageIO to a standard-range PNG (keeping the colour profile and rotation) and also keeps the original. |
 
-**Permissions the Android app uses:** notification access, RECEIVE_SMS, READ_LOGS (granted over adb, for the clipboard), SYSTEM_ALERT_WINDOW (lets the invisible clipboard reader open from the background), QUERY_ALL_PACKAGES (to show app names on the Mac), INTERNET and Wi-Fi state (local network only).
+**Permissions the Android app uses:** notification access, RECEIVE_SMS, the optional **Accessibility copy detector** (copy taps and "Copied" pop-ups only, no window content), READ_LOGS (fallback copy detection, granted over adb), SYSTEM_ALERT_WINDOW (lets the invisible clipboard reader open from the background), POST_NOTIFICATIONS (the setup reminder), QUERY_ALL_PACKAGES (to show app names on the Mac), INTERNET and Wi-Fi state (local network only).
 
 ## Security and privacy
 
