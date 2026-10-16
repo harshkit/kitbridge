@@ -46,7 +46,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     }))
     var item: NSStatusItem!
     var listener: NWListener!
-    var pending = 0     // connections still inside their 5-second handshake window
+    var pending = [Session]() // strangers still inside their 5-second handshake window, oldest first
     var conn: Session? // the live phone; set only once it has sent a valid session frame
     var phone = ""
     var seen = [String: String]()
@@ -65,16 +65,14 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         listener = try! NWListener(using: p, on: 47811) // fixed port: the phone can reconnect without discovery
         listener.service = NWListener.Service(name: Host.current().localizedName ?? "Mac", type: "_phonebridge._tcp")
         listener.newConnectionHandler = { [unowned self] c in
-            // At most 8 strangers at once; a flood of half-open connections can't pile up.
-            guard pending < 8 else { return c.cancel() }
+            // At most 8 strangers at once. When full, the oldest is evicted rather than the newcomer
+            // refused, so a flood can't lock the real phone out.
+            if pending.count >= 8 { drop(pending[0]) }
             let s = Session(c)
-            pending += 1
+            pending.append(s)
             c.start(queue: .main); read(s)
             // Strangers get 5 s to complete the handshake, then they're gone.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [unowned self] in
-                pending -= 1
-                if !s.authed { drop(s) }
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [unowned self] in if !s.authed { drop(s) } }
         }
         listener.start(queue: .main)
 
@@ -146,7 +144,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
               let plain = try? AES.GCM.open(box, using: sk),
               let j = try? JSONSerialization.jsonObject(with: plain) as? [String: Any] else { return false }
         s.rx += 1
-        s.authed = true
+        if !s.authed { s.authed = true; pending.removeAll { $0 === s } }
         if conn !== s { conn?.c.cancel(); conn = s; refresh(); send(["t": "hello", "name": Host.current().localizedName ?? "Mac"]) }
         handle(j)
         return true
@@ -154,6 +152,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
 
     func drop(_ s: Session) {
         s.c.cancel()
+        pending.removeAll { $0 === s }
         if conn === s { conn = nil; refresh() }
     }
 
