@@ -26,6 +26,8 @@ Only someone holding the pairing key can complete the handshake. The pairing key
 
 **Send to Mac.** Any app can open the share target, so it accepts only shared `content://` items (never Kitbridge's own files), reads at most 20 MB, and asks you to tap **Send** first, which another app can't do for you.
 
+**Finding the Mac.** The Mac answers a 4-byte "KB?1" UDP message on port 47811 with "KB!1" (no amplification, no data). That only tells the phone where to connect; the encrypted, pairing-key-authenticated handshake still decides whether anything is trusted, so a fake answer can at most delay the connection.
+
 ## What Kitbridge does not protect against
 
 - **Someone with your unlocked Mac or phone.** The pairing key is stored in the Mac user's Application Support folder and in the app's private storage on Android.
