@@ -26,7 +26,7 @@ Only someone holding the pairing key can complete the handshake. The pairing key
 
 **Send to Mac.** Any app can open the share target, so it accepts only shared `content://` items (never Kitbridge's own files), reads at most 20 MB, and asks you to tap **Send** first, which another app can't do for you.
 
-**Finding the Mac.** The Mac answers a 4-byte "KB?1" UDP message on port 47811 with "KB!1" (no amplification, no data). That only tells the phone where to connect; the encrypted, pairing-key-authenticated handshake still decides whether anything is trusted, so a fake answer can at most delay the connection.
+**Finding the Mac.** The phone sends a 20-byte UDP message on port 47811: `KB?1` plus a random 16-byte challenge. The Mac answers `KB!1` plus the first 16 bytes of HMAC-SHA256(pairing key, "kb-discover" + challenge). The phone accepts only an answer that proves the pairing key, so nobody else on the Wi-Fi can redirect it. The encrypted handshake still decides whether anything is trusted. There is no amplification: the answer is the same size as the question.
 
 ## What Kitbridge does not protect against
 

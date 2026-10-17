@@ -151,12 +151,17 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         // Bonjour stays on too, but Samsung phones often filter its multicast. Pairing is still
         // checked by the encrypted handshake, so answering reveals nothing.
         finder = try? NWListener(using: .udp, on: 47811)
-        finder?.newConnectionHandler = { c in
+        finder?.newConnectionHandler = { [unowned self] c in
             c.start(queue: .main)
-            c.receiveMessage { d, _, _, _ in
-                guard let d, d.starts(with: Data("KB?1".utf8)) else { return c.cancel() }
+            c.receiveMessage { [unowned self] d, _, _, _ in
+                // "KB?1" + 16-byte challenge → "KB!1" + HMAC(pairing key, "kb-discover" + challenge), first 16 bytes.
+                // Only the paired Mac can answer correctly, so nobody else on the Wi-Fi can pose as it.
+                guard let d, d.count == 20, d.starts(with: Data("KB?1".utf8)) else {
+                    log("discovery: ignored \(d?.count ?? 0)-byte message"); return c.cancel()
+                }
+                let proof = Data(HMAC<SHA256>.authenticationCode(for: Data("kb-discover".utf8) + d.dropFirst(4), using: key)).prefix(16)
                 log("discovery request from \(c.endpoint)")
-                c.send(content: Data("KB!1".utf8), completion: .contentProcessed { _ in c.cancel() })
+                c.send(content: Data("KB!1".utf8) + proof, completion: .contentProcessed { _ in c.cancel() })
             }
         }
         finder?.start(queue: .main)

@@ -161,15 +161,20 @@ object Link {
         if (hostBits in 1..10) for (h in 1 until (1 shl hostBits) - 1) if ((base or h) != ip) targets += addr(base or h) // ≤ 1022 tiny packets
         java.net.DatagramSocket().use { s ->
             net.bindSocket(s)
-            s.broadcast = true; s.soTimeout = 700
-            val ask = "KB?1".toByteArray()
+            s.broadcast = true; s.soTimeout = 250
+            // Random challenge; only the paired Mac can answer with HMAC(pairing key, "kb-discover" + challenge).
+            val challenge = ByteArray(16).also(rnd::nextBytes)
+            val ask = "KB?1".toByteArray() + challenge
+            val mac = javax.crypto.Mac.getInstance("HmacSHA256").apply { init(key()) }
+            val proof = "KB!1".toByteArray() + mac.doFinal("kb-discover".toByteArray() + challenge).copyOf(16)
             repeat(3) {
                 targets.forEach { t -> runCatching { s.send(java.net.DatagramPacket(ask, ask.size, t, PORT)) } }
-                val buf = ByteArray(64); val p = java.net.DatagramPacket(buf, buf.size)
-                try {
-                    s.receive(p)
-                    if (String(buf, 0, p.length).startsWith("KB!1")) return@runCatching p.address.hostAddress
-                } catch (_: java.net.SocketTimeoutException) {}
+                val until = System.currentTimeMillis() + 800
+                while (System.currentTimeMillis() < until) { // read every reply in the window; ignore unproven ones
+                    val buf = ByteArray(64); val p = java.net.DatagramPacket(buf, buf.size)
+                    try { s.receive(p) } catch (_: java.net.SocketTimeoutException) { continue }
+                    if (java.security.MessageDigest.isEqual(buf.copyOf(p.length), proof)) return@runCatching p.address.hostAddress
+                }
             }
             null
         }
