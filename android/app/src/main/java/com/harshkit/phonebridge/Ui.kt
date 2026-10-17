@@ -212,6 +212,7 @@ class MainActivity : KitActivity() {
     private lateinit var bridge: BridgeView
     private lateinit var heroTitle: TextView
     private lateinit var heroSub: TextView
+    private lateinit var codeBtn: TextView
     private lateinit var pill: TextView
     private lateinit var stats: List<TextView>
     private lateinit var perms: LinearLayout
@@ -241,6 +242,11 @@ class MainActivity : KitActivity() {
         hero.addView(heroTitle, lp(top = 16))
         heroSub = text("", 15f, GREY).apply { gravity = Gravity.CENTER }
         hero.addView(heroSub, lp(top = 4))
+        codeBtn = text("Enter Mac code", 16f, BLUE, BOLD).apply {
+            gravity = Gravity.CENTER; setPadding(0, dp(12), 0, dp(4))
+            setOnClickListener { askCode() }
+        }
+        hero.addView(codeBtn, lp())
         col.addView(hero, lp(bottom = 26))
 
         // Today: three counters with big numbers.
@@ -330,6 +336,7 @@ class MainActivity : KitActivity() {
             stats[i].text = if (enabled) Link.count(k).toString() else value("Off", "")
         }
         bridge.connected = Link.connected
+        codeBtn.visibility = if (Link.connected) View.GONE else View.VISIBLE
         heroTitle.text = when {
             Link.connected -> Link.macName.ifEmpty { "Your Mac" }
             !Link.prefs.getBoolean("master", true) -> "Bridge is off"
@@ -341,6 +348,23 @@ class MainActivity : KitActivity() {
             !Link.prefs.getBoolean("master", true) -> "Turn on Bridge below"
             else -> "Same Wi-Fi as your Mac"
         }
+    }
+
+    /** The code in the Mac's Kitbridge menu ("Connect code: 36"), or a full address. */
+    private fun askCode() {
+        val field = android.widget.EditText(this).apply {
+            hint = "e.g. 36"; setSingleLine()
+            keyListener = android.text.method.DigitsKeyListener.getInstance("0123456789.")
+            setPadding(dp(20), dp(16), dp(20), dp(16))
+        }
+        android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Enter Mac code")
+            .setMessage("On your Mac, click the Kitbridge icon in the menu bar and type the Connect code shown there.")
+            .setView(field)
+            .setPositiveButton("Connect") { _, _ ->
+                if (!Link.useCode(field.text.toString())) Toast.makeText(this, "That code doesn't look right", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null).show()
     }
 
     private fun buildPerms() {

@@ -57,6 +57,21 @@ func log(_ msg: String) {
     else { try? line.write(to: url) }
 }
 
+/// This Mac's Wi-Fi/Ethernet IPv4 address (en0, then en1), for the "Connect code" shown in the menu.
+func localIPv4() -> String? {
+    var head: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&head) == 0, let first = head else { return nil }
+    defer { freeifaddrs(head) }
+    var found = [String: String]()
+    for p in sequence(first: first, next: { $0.pointee.ifa_next }) {
+        guard let a = p.pointee.ifa_addr, a.pointee.sa_family == UInt8(AF_INET) else { continue }
+        var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+        getnameinfo(a, socklen_t(a.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST)
+        found[String(cString: p.pointee.ifa_name)] = String(cString: host)
+    }
+    return found["en0"] ?? found["en1"]
+}
+
 func findCode(_ s: String) -> String? {
     let r = NSRange(s.startIndex..., in: s)
     guard otpHint.firstMatch(in: s, range: r) != nil, let m = otpCode.firstMatch(in: s, range: r),
@@ -83,6 +98,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     }))
     var item: NSStatusItem!
     var listener: NWListener!
+    var finder: NWListener? // answers the phone's "where's my Mac?" broadcast
     var pending = [Session]() // strangers still inside their 5-second handshake window, oldest first
     var conn: Session? // the live phone; set only once it has sent a valid session frame
     var phone = ""
@@ -131,6 +147,20 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         }
         listener.start(queue: .main)
 
+        // The phone broadcasts "KB?1" when it can't reach its remembered address; we answer "KB!1".
+        // Bonjour stays on too, but Samsung phones often filter its multicast. Pairing is still
+        // checked by the encrypted handshake, so answering reveals nothing.
+        finder = try? NWListener(using: .udp, on: 47811)
+        finder?.newConnectionHandler = { c in
+            c.start(queue: .main)
+            c.receiveMessage { d, _, _, _ in
+                guard let d, d.starts(with: Data("KB?1".utf8)) else { return c.cancel() }
+                log("discovery request from \(c.endpoint)")
+                c.send(content: Data("KB!1".utf8), completion: .contentProcessed { _ in c.cancel() })
+            }
+        }
+        finder?.start(queue: .main)
+
         Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [unowned self] _ in pollClipboard() }
         Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [unowned self] _ in send(["t": "ping"]) } // keeps a locked phone's link alive (it gives up after 25 s of silence)
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [unowned self] _ in checkAlerts() } // notices when you turn alerts on
@@ -144,6 +174,10 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
                                      accessibilityDescription: "Kitbridge")
         let m = NSMenu()
         m.addItem(withTitle: conn == nil ? "Waiting for phone…" : "Connected: \(phone)", action: nil, keyEquivalent: "")
+        if let ip = localIPv4() {
+            let code = m.addItem(withTitle: "Connect code: \(ip.split(separator: ".").last ?? "")   (\(ip))", action: nil, keyEquivalent: "")
+            code.toolTip = "If your phone can't find this Mac, open Kitbridge on the phone → Enter Mac code."
+        }
         if alertsOff { m.addItem(withTitle: "⚠ Turn on notifications…", action: #selector(openAlertSettings), keyEquivalent: "") }
         m.addItem(.separator())
         let clip = m.addItem(withTitle: "Share clipboard with phone", action: #selector(toggleClip), keyEquivalent: "")

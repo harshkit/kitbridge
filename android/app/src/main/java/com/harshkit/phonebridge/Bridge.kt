@@ -91,28 +91,102 @@ object Link {
         // Round-trip ping: feeds the latency tile and spots a dead link sooner.
         Executors.newSingleThreadScheduledExecutor().scheduleWithFixedDelay(
             { if (connected) send(JSONObject().put("t", "ping").put("ts", System.nanoTime())) }, 1, 10, TimeUnit.SECONDS)
+        watchNetwork()
         thread(name = "link") {
+            var wait = 2000L
             while (true) {
                 out = null; session = null // never look connected while a new attempt is under way
                 try {
-                    if (key() == null) { status = "Not paired — run setup.sh on the Mac"; Thread.sleep(3000); continue }
-                    if (!prefs.getBoolean("master", true)) { status = "Bridge off"; Thread.sleep(1000); continue }
+                    if (key() == null) { status = "Not paired — run setup.sh on the Mac"; nap(3000); continue }
+                    if (!prefs.getBoolean("master", true)) { status = "Bridge off"; nap(2000); continue }
                     val h = prefs.getString("host", null)
-                    // Cached address first: reconnects in milliseconds instead of waiting on mDNS.
-                    if (h != null) runCatching { connect(h, prefs.getInt("port", 0)) }
+                    if (h != null) runCatching { connect(h, PORT); wait = 2000L } // returns when the link ends
                     status = "Looking for Mac…"
-                    val (dh, dp) = discover()
-                    connect(dh, dp)
+                    // Ask the Wi-Fi "where's my Mac?" (answers in milliseconds), then Bonjour as a fallback.
+                    val found = findByBroadcast() ?: runCatching { discover().first }.getOrNull()
+                    if (found != null && found != h) { prefs.edit().putString("host", found).apply(); continue }
+                    status = "Looking for Mac… (not on this Wi-Fi?)"
                 } catch (e: Exception) {
                     status = "Looking for Mac… (${e.message})"
                 }
                 out = null; session = null; rttMs = -1
-                Thread.sleep(1500)
+                nap(wait); wait = minOf(wait * 2, 10_000L)
             }
         }
     }
 
+    const val PORT = 47811
+    private val wake = java.util.concurrent.Semaphore(0)
+    /** Sleep, but wake at once when Wi-Fi comes back, the screen turns on, or a Mac code is entered. */
+    private fun nap(ms: Long) { wake.drainPermits(); wake.tryAcquire(ms, TimeUnit.MILLISECONDS) }
+    fun kick() { if (!connected) wake.release() }
+
     fun reconnect() { runCatching { sock?.close() } }
+
+    /** Use a Mac code from the Mac's menu: its last address number (e.g. "36"), or a full IP. */
+    fun useCode(code: String): Boolean {
+        val c = code.trim()
+        val ip = when {
+            c.matches(Regex("""\d{1,3}(\.\d{1,3}){3}""")) -> c
+            c.matches(Regex("""\d{1,3}""")) && c.toInt() in 1..254 -> myIPv4()?.substringBeforeLast('.')?.let { "$it.$c" }
+            else -> null
+        } ?: return false
+        prefs.edit().putString("host", ip).apply()
+        reconnect(); wake.release()
+        return true
+    }
+
+    /** The Wi-Fi network itself, not the default route, which may be mobile data. */
+    private fun wifiNetwork(): android.net.Network? = ctx.getSystemService(android.net.ConnectivityManager::class.java).let { cm ->
+        @Suppress("DEPRECATION") cm.allNetworks.firstOrNull { cm.getNetworkCapabilities(it)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true }
+    }
+    private fun wifiAddress(): android.net.LinkAddress? = wifiNetwork()?.let {
+        ctx.getSystemService(android.net.ConnectivityManager::class.java).getLinkProperties(it)
+    }?.linkAddresses?.firstOrNull { it.address is java.net.Inet4Address }
+    private fun myIPv4() = wifiAddress()?.address?.hostAddress
+
+    /**
+     * Ask the Wi-Fi "where's my Mac?" ("KB?1"); the Mac answers "KB!1" from its address. Sent as a broadcast
+     * and also straight to every address on the network, because many routers block broadcast/multicast
+     * between Wi-Fi devices (which is also why Bonjour often fails). Bound to Wi-Fi, never mobile data.
+     */
+    private fun findByBroadcast(): String? = runCatching {
+        val net = wifiNetwork() ?: return@runCatching null
+        val la = wifiAddress() ?: return@runCatching null
+        val ip = java.nio.ByteBuffer.wrap(la.address.address).int
+        val hostBits = 32 - la.prefixLength
+        val base = ip and (-1 shl hostBits)
+        fun addr(i: Int) = java.net.InetAddress.getByAddress(java.nio.ByteBuffer.allocate(4).putInt(i).array())
+        val targets = mutableListOf(java.net.InetAddress.getByName("255.255.255.255"), addr(base or ((1 shl hostBits) - 1)))
+        if (hostBits in 1..10) for (h in 1 until (1 shl hostBits) - 1) if ((base or h) != ip) targets += addr(base or h) // ≤ 1022 tiny packets
+        java.net.DatagramSocket().use { s ->
+            net.bindSocket(s)
+            s.broadcast = true; s.soTimeout = 700
+            val ask = "KB?1".toByteArray()
+            repeat(3) {
+                targets.forEach { t -> runCatching { s.send(java.net.DatagramPacket(ask, ask.size, t, PORT)) } }
+                val buf = ByteArray(64); val p = java.net.DatagramPacket(buf, buf.size)
+                try {
+                    s.receive(p)
+                    if (String(buf, 0, p.length).startsWith("KB!1")) return@runCatching p.address.hostAddress
+                } catch (_: java.net.SocketTimeoutException) {}
+            }
+            null
+        }
+    }.getOrNull()
+
+    /** Reconnect immediately when Wi-Fi changes or comes back, and when you turn the screen on. */
+    private fun watchNetwork() {
+        val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+        val wifi = android.net.NetworkRequest.Builder().addTransportType(android.net.NetworkCapabilities.TRANSPORT_WIFI).build()
+        cm.registerNetworkCallback(wifi, object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(n: android.net.Network) { reconnect(); wake.release() } // drop a link left on the old network
+            override fun onLost(n: android.net.Network) { reconnect() }
+        })
+        ctx.registerReceiver(object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) = kick()
+        }, android.content.IntentFilter().apply { addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT) })
+    }
 
     private fun discover(): Pair<String, Int> {
         val nsd = ctx.getSystemService(NsdManager::class.java)
@@ -142,7 +216,7 @@ object Link {
         val lock = ctx.getSystemService(android.net.wifi.WifiManager::class.java).createMulticastLock("phonebridge").apply { acquire() }
         nsd.discoverServices(SERVICE, NsdManager.PROTOCOL_DNS_SD, l)
         try {
-            latch.await(15, TimeUnit.SECONDS)
+            latch.await(5, TimeUnit.SECONDS) // only a fallback now; the broadcast finds the Mac first
         } finally {
             runCatching { nsd.stopServiceDiscovery(l) }
             lock.release()
