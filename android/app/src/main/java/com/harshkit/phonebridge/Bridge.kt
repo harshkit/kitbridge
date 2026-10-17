@@ -438,7 +438,7 @@ object ClipWatch {
      * calls this from its screen until a real clipboard line has been seen.
      */
     @Volatile private var lastTrigger = 0L
-    /** A copy was detected (by Accessibility or the log watcher): read it once, however many detectors fired. */
+    /** A copy was detected: read it once, even if several log lines fire for one copy. */
     fun trigger(c: Context) {
         val now = System.currentTimeMillis()
         if (!Link.on("clip_out") || now - lastTrigger < 1500) return
@@ -448,11 +448,6 @@ object ClipWatch {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))
         }, 250)
     }
-
-    /** True when the copy detector is actually running (not merely switched on in settings). */
-    fun a11yOn(c: Context) = c.getSystemService(android.view.accessibility.AccessibilityManager::class.java)
-        .getEnabledAccessibilityServiceList(android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-        .any { it.resolveInfo.serviceInfo.packageName == c.packageName }
 
     fun restartIfBlind() { if (!healthy) { restartNow = true; proc?.destroy() } }
 
@@ -464,7 +459,6 @@ object ClipWatch {
     fun probe(delayMs: Long) = thread {
         Thread.sleep(delayMs)
         if (onScreen || !::appCtx.isInitialized) return@thread
-        if (a11yOn(appCtx)) { BlindNotice.hide(appCtx); return@thread } // copies are detected without log access
         healthy = false
         probeSkip = 1
         probeUntil = System.currentTimeMillis() + 3000
@@ -542,32 +536,6 @@ fun publishShareShortcut(c: Context) = runCatching {
         .setLongLived(true)
         .setIntent(Intent(c, SendActivity::class.java).setAction(Intent.ACTION_SEND))
         .build())
-}
-
-/**
- * Copy detector that survives reboots and updates. Narrow on purpose: it only receives taps, pop-ups
- * and window changes (no window content), and only acts on a "Copy" button, a "Copied" pop-up or the
- * system clipboard pop-up. It never reads the clipboard itself; ClipActivity does that.
- */
-class CopyWatcher : android.accessibilityservice.AccessibilityService() {
-    private val copyButton = Regex("^(copy|copy (link|text|image|address|url|to clipboard))$", RegexOption.IGNORE_CASE)
-
-    override fun onServiceConnected() { BlindNotice.hide(this) }
-
-    override fun onAccessibilityEvent(e: android.view.accessibility.AccessibilityEvent) {
-        val label = (e.text.joinToString(" ") + " " + (e.contentDescription ?: "")).trim()
-        val cls = e.className?.toString().orEmpty()
-        val copied = when (e.eventType) {
-            android.view.accessibility.AccessibilityEvent.TYPE_VIEW_CLICKED -> copyButton.matches(label)
-            else -> label.contains("copied", ignoreCase = true) || cls.contains("clipboard", ignoreCase = true)
-        }
-        if (copied) {
-            android.util.Log.i("Kitbridge", "Copy detected (${e.packageName}, type ${e.eventType})")
-            ClipWatch.trigger(this)
-        }
-    }
-
-    override fun onInterrupt() {}
 }
 
 /** "Turn on copy to Mac" — shown only while Android hasn't granted the log access the clipboard watcher needs. */

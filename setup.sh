@@ -52,6 +52,5 @@ ok adb shell dumpsys deviceidle whitelist +"$P"                             # no
 MAC_IP=$(ipconfig getifaddr en0 || ipconfig getifaddr en1 || true)
 adb shell am start -n "$P/.PairActivity" --es key "$(cat "$KEY")" --es host "$MAC_IP" >/dev/null
 echo "Paired."
-echo "For automatic copy from the phone: Settings → Accessibility → Installed apps → Kitbridge: copy to Mac → On"
-echo "  (greyed out? Settings → Apps → Kitbridge → ⋮ → Allow restricted settings, then try again)"
-adb shell am start -a android.settings.ACCESSIBILITY_SETTINGS >/dev/null 2>&1 || true
+echo "If the phone shows \"Turn on copy to Mac\", tap it and choose Allow."
+echo "Done. You can switch Wireless debugging off now (some banking apps refuse to open while it's on)."
