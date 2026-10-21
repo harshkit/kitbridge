@@ -31,7 +31,9 @@ cat > "$A/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 # A stable local identity keeps macOS permissions across rebuilds; fall back to ad-hoc.
-ID=$(security find-identity -v -p codesigning | grep -o '"[^"]*Local Signing"' | head -1 | tr -d '"' || true)
+# A stable local certificate keeps macOS permissions (Bluetooth, notifications) across rebuilds; it needn't be
+# "trusted" to sign. Without one, fall back to ad-hoc (each build then looks like a new app to macOS).
+ID=$(security find-identity -p codesigning | grep -o '[0-9A-F]\{40\} "[^"]*Local Signing"' | head -1 | cut -d' ' -f1 || true)
 codesign --force --sign "${ID:--}" "$A"
 ./install-app.sh "$A"
 echo "Installed. Signed with: ${ID:-ad-hoc}"

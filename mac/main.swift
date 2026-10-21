@@ -1,4 +1,5 @@
 import AppKit
+import CoreAudio
 import IOBluetooth
 import SwiftUI
 import ImageIO
@@ -244,6 +245,24 @@ final class HandsFree: NSObject {
     func end() { log("hands-free: end"); hf?.perform(NSSelectorFromString("endCall")) }
     func dial(_ n: String) { log("hands-free: dial"); hf?.perform(NSSelectorFromString("dialNumber:"), with: n as NSString); audioToMac() }
     func audioToMac() { hf?.perform(NSSelectorFromString("transferAudioToComputer")) }
+    /// Explicitly open the voice (SCO) channel and record which audio devices macOS then offers.
+    func openVoice() {
+        log("hands-free: connectSCO requested")
+        hf?.perform(NSSelectorFromString("connectSCO"))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { log("hands-free: audio devices now \(HandsFree.audioDevices())") }
+    }
+    static func audioDevices() -> [String] {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size) == noErr else { return [] }
+        var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &ids) == noErr else { return [] }
+        return ids.compactMap { id in
+            var n: CFString = "" as CFString; var s = UInt32(MemoryLayout<CFString>.size)
+            var a = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyName, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            return AudioObjectGetPropertyData(id, &a, 0, nil, &s, &n) == noErr ? n as String : nil
+        }
+    }
     func audioToPhone() { log("hands-free: audio to phone"); hf?.perform(NSSelectorFromString("transferAudioToPhone")) }
 
     // IOBluetoothHandsFreeDelegate / IOBluetoothHandsFreeDeviceDelegate (selectors from the old public header)
@@ -511,8 +530,15 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         refresh()
     }
 
+    /// Bluetooth calls can block on macOS's permission prompt, so they never run on the main thread.
     func startHandsFree() {
-        let phones = HandsFree.pairedPhones()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let phones = HandsFree.pairedPhones()
+            DispatchQueue.main.async { self?.startHandsFree(with: phones) }
+        }
+    }
+
+    func startHandsFree(with phones: [IOBluetoothDevice]) {
         log("hands-free: paired phones \(phones.map { $0.name ?? "?" })")
         guard let p = phones.first(where: { ($0.name ?? "").localizedCaseInsensitiveContains(phone) || phone.contains($0.name ?? "#") }) ?? phones.first else {
             NSApp.activate(ignoringOtherApps: true)
@@ -528,6 +554,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         hands.onCallState = { [weak self] in
             guard let self else { return }
             if hands.callActive && !answeredOnMac && !routedThisCall { routedThisCall = true; hands.audioToPhone() }
+            if hands.callActive && answeredOnMac && !routedThisCall { routedThisCall = true; hands.openVoice() }
             if !hands.callActive && hands.setupMode == 0 { answeredOnMac = false; routedThisCall = false }
         }
         hands.connect(to: p)
