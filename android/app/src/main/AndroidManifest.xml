@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- "Call from Mac": dial a number on the phone (granted by setup; otherwise the dialer opens filled in). -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- Answer / decline / end the phone's own calls from the Mac when the dialer offers no button (Samsung). -->
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
     <!-- Granted over adb by setup.sh: lets us see the system's clipboard-denial log line. -->
     <uses-permission android:name="android.permission.READ_LOGS" tools:ignore="ProtectedPermissions" />

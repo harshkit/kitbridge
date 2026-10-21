@@ -226,7 +226,8 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     var phoneVersion = ""
     var battery: Int? = nil, charging = false
     let call = CallModel()
-    var callPanel: NSPanel?
+    var callPanel: NSPanel?   // non-nil while a call is showing
+    var shownPanel: NSPanel?  // the single panel, created once and reused
     var ring: NSSound?
     var alertsOff = false // macOS notifications for Kitbridge are turned off
     // Alerts already shown, kept across restarts so a reconnect's catch-up never re-shows ones you cleared.
@@ -368,6 +369,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         log("call \(state) from \(call.app); shape \((j["shape"] as? [String: Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }.map { String(decoding: $0, as: UTF8.self) } ?? "-")")
         if state == "ringing" { startRing() } else { stopRing() }
         if callPanel == nil {
+            if let old = shownPanel { old.alphaValue = 1; old.orderFrontRegardless(); callPanel = old; refresh(); return }
             let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 372, height: 80), styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: false)
             p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = true
@@ -381,7 +383,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
             }
             p.alphaValue = 0; p.orderFrontRegardless()
             NSAnimationContext.runAnimationGroup { $0.duration = 0.25; p.animator().alphaValue = 1 }
-            callPanel = p; refresh()
+            callPanel = p; shownPanel = p; refresh()
         }
     }
 
@@ -395,8 +397,9 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     func closeCall() {
         stopRing()
         guard let p = callPanel else { return }
-        callPanel = nil; call.id = ""; refresh()
-        NSAnimationContext.runAnimationGroup({ $0.duration = 0.2; p.animator().alphaValue = 0 }, completionHandler: { p.orderOut(nil) })
+        callPanel = nil; call.id = ""; call.since = nil; refresh()
+        NSAnimationContext.runAnimationGroup({ $0.duration = 0.2; p.animator().alphaValue = 0 },
+                                             completionHandler: { [weak self] in if self?.callPanel == nil { p.orderOut(nil) } })
     }
 
     func startRing() {

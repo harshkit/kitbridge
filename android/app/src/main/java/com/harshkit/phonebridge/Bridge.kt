@@ -504,10 +504,13 @@ class BridgeService : NotificationListenerService() {
         val decline = extra(Notification.EXTRA_DECLINE_INTENT) ?: byLabel("decline", "reject")
         val hangup = extra(Notification.EXTRA_HANG_UP_INTENT) ?: byLabel("hang up", "end call", "end")
         val type = e.getInt(Notification.EXTRA_CALL_TYPE, 0) // 1 incoming, 2 ongoing, 3 screening
-        val chrono = e.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER) || n.`when` > 0 && n.flags and Notification.FLAG_ONGOING_EVENT != 0 && e.containsKey("android.chronometerCountDown")
+        // Samsung's dialer (observed on an S26, Android 17) marks a RINGING call as type 2 "ongoing", text
+        // "Incoming call", with no Answer button (its own full-screen UI answers); dialling out is text
+        // "Calling…"; once connected the text is empty and `when` is the connect time. Standard dialers
+        // use type 1 + EXTRA_ANSWER_INTENT. Handle both.
         val state = when {
-            type == 1 || type == 3 || (answer != null && hangup == null) -> "ringing"
-            text.contains("dial", true) || text.contains("calling", true) || text.contains("connecting", true) -> "dialing"
+            type == 1 || type == 3 || text.contains("incoming", true) || (answer != null && hangup == null) -> "ringing"
+            listOf("calling", "dial", "connecting", "ringing").any { text.contains(it, true) } -> "dialing"
             else -> "active"
         }
         Calls.remember(sbn.key, answer, decline, hangup)
@@ -518,9 +521,13 @@ class BridgeService : NotificationListenerService() {
         android.util.Log.i("Kitbridge", "Call $state ($app)")
         val j = JSONObject().put("t", "call").put("id", sbn.key).put("state", state).put("app", app).put("pkg", sbn.packageName)
             .put("name", title.ifEmpty { app }).put("detail", text)
-            .put("since", if (state == "active" && (chrono || e.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))) n.`when` else 0L)
+            .put("since", if (state == "active" && n.`when` > 0) n.`when` else 0L)
             .put("can", org.json.JSONArray().apply {
-                if (answer != null) put("answer"); if (decline != null) put("decline"); if (hangup != null) put("hangup")
+                val telecom = Calls.canTelecom(this@BridgeService) && sbn.packageName != packageName
+                if (state == "ringing") {
+                    if (answer != null || telecom) put("answer")
+                    if (decline != null || telecom || hangup != null) put("decline")
+                } else if (hangup != null || telecom) put("hangup")
             })
         runCatching { avatar(n.getLargeIcon()?.loadDrawable(this), packageManager.getApplicationIcon(sbn.packageName)) }
             .getOrNull()?.let { j.put("photo", it) }
@@ -810,9 +817,20 @@ object Calls {
         if (acts.size > 20) acts.remove(acts.keys.first())
     }
     @Synchronized fun forget(key: String) { acts.remove(key) }
+    fun canTelecom(c: Context) = c.checkSelfPermission(Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED
+
+    /** Press the call's own button; for the phone's own calls without one (Samsung), use Telecom directly. */
     fun act(c: Context, key: String, what: String): Boolean {
-        val pi = synchronized(this) { acts[key]?.get(what) } ?: return false.also { android.util.Log.w("Kitbridge", "Call $what: no button") }
-        return runCatching { pi.send(); android.util.Log.i("Kitbridge", "Call $what pressed"); true }.getOrDefault(false)
+        val m = synchronized(this) { acts[key] }
+        val pi = m?.get(what) ?: if (what == "decline") m?.get("hangup") else null
+        if (pi != null) return runCatching { pi.send(); android.util.Log.i("Kitbridge", "Call $what pressed"); true }.getOrDefault(false)
+        if (!canTelecom(c)) return false.also { android.util.Log.w("Kitbridge", "Call $what: no button, no Telecom permission") }
+        return runCatching {
+            val tm = c.getSystemService(android.telecom.TelecomManager::class.java)
+            @Suppress("DEPRECATION")
+            val ok = if (what == "answer") { tm.acceptRingingCall(); true } else tm.endCall()
+            android.util.Log.i("Kitbridge", "Call $what via Telecom: $ok"); ok
+        }.getOrElse { android.util.Log.w("Kitbridge", "Call $what via Telecom failed: ${it.javaClass.simpleName}"); false }
     }
 
     /**

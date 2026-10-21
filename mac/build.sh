@@ -17,8 +17,8 @@ cat > "$A/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>Kitbridge</string>
   <key>CFBundleIconFile</key><string>Kitbridge</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.4.1</string>
-  <key>CFBundleVersion</key><string>9</string>
+  <key>CFBundleShortVersionString</key><string>1.4.2</string>
+  <key>CFBundleVersion</key><string>10</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSLocalNetworkUsageDescription</key><string>Kitbridge talks to your phone on this Wi-Fi.</string>
