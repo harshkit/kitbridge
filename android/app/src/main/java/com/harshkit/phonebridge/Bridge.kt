@@ -59,7 +59,7 @@ const val MAX_FRAME = 32 * 1024 * 1024
 object Link {
     lateinit var ctx: Context
     @Volatile var status = "Starting…"
-        set(v) { if (v != field) android.util.Log.i("Kitbridge", v); field = v }
+        set(v) { if (v != field) android.util.Log.i("Kitbridge", v.replace(Regex("""\(\d{1,3}(\.\d{1,3}){3}\)"""), "(Mac)")); field = v }
     @Volatile private var out: DataOutputStream? = null
     @Volatile private var sock: Socket? = null
     @Volatile var lastClip: String? = null
@@ -120,7 +120,7 @@ object Link {
     /** "Phone Diagnostics" from the Mac menu: Kitbridge's own log lines plus permission states. Never other apps' logs. */
     private fun diagnostics(): JSONObject {
         val lines = runCatching {
-            Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "400", "-s", "Kitbridge:V")).inputStream.bufferedReader().readText()
+            Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "400", "--pid=${android.os.Process.myPid()}", "-s", "Kitbridge:V")).inputStream.bufferedReader().readText()
         }.getOrDefault("(logcat unavailable)").takeLast(60_000)
         fun has(p: String) = ctx.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
         val perms = JSONObject()
@@ -358,14 +358,15 @@ object Link {
             "pong" -> { rttMs = (System.nanoTime() - j.getLong("ts")) / 1_000_000; return }
             "hello" -> { macName = j.optString("name"); publishShareShortcut(ctx); return }
             "callact" -> {
-                val ok = Calls.act(ctx, j.getString("id"), j.getString("act"))
-                send(JSONObject().put("t", "callacted").put("id", j.getString("id")).put("act", j.getString("act")).put("ok", ok))
+                val id = j.optString("id"); val what = j.optString("act")
+                val ok = id.isNotEmpty() && what in setOf("answer", "decline", "hangup") && Calls.act(ctx, id, what)
+                send(JSONObject().put("t", "callacted").put("id", id).put("act", what).put("ok", ok))
                 return
             }
             "diag" -> { thread { send(diagnostics()) }; return }
             "dial" -> {
                 android.util.Log.i("Kitbridge", "Dial request received")
-                val r = Calls.dial(ctx, j.getString("number"))
+                val r = Calls.dial(ctx, j.optString("number"))
                 send(JSONObject().put("t", "dialed").put("ok", r != "error").put("how", r)); return
             }
             "reply" -> {
@@ -519,7 +520,7 @@ class BridgeService : NotificationListenerService() {
             listOf("calling", "dial", "connecting", "ringing").any { text.contains(it, true) } -> "dialing"
             else -> "active"
         }
-        Calls.remember(sbn.key, answer, decline, hangup)
+        Calls.remember(sbn.key, answer, decline, hangup, telecom = ringingNow)
         if (live && state == "ringing") {
             Link.bump("calls")
             History.add("calls", JSONObject().put("app", app).put("title", title).put("text", text))
@@ -529,7 +530,7 @@ class BridgeService : NotificationListenerService() {
             .put("name", title.ifEmpty { app }).put("detail", text)
             .put("since", if (state == "active" && n.`when` > 0) n.`when` else 0L)
             .put("can", org.json.JSONArray().apply {
-                val telecom = Calls.canTelecom(this@BridgeService) && sbn.packageName != packageName
+                val telecom = Calls.canTelecom(this@BridgeService) && ringingNow // Telecom only controls the phone's own SIM calls
                 if (state == "ringing") {
                     if (answer != null || telecom) put("answer")
                     if (decline != null || telecom || hangup != null) put("decline")
@@ -817,19 +818,22 @@ class ImageProvider : ContentProvider() {
  */
 /** The phone's own call buttons, kept per call notification, pressed when you click them on the Mac. */
 object Calls {
+    private val simCalls = HashSet<String>() // the phone's own SIM calls: only these may use TelecomManager
     private val acts = HashMap<String, Map<String, android.app.PendingIntent?>>()
-    @Synchronized fun remember(key: String, answer: android.app.PendingIntent?, decline: android.app.PendingIntent?, hangup: android.app.PendingIntent?) {
+    @Synchronized fun remember(key: String, answer: android.app.PendingIntent?, decline: android.app.PendingIntent?, hangup: android.app.PendingIntent?, telecom: Boolean) {
         acts[key] = mapOf("answer" to answer, "decline" to decline, "hangup" to hangup)
+        if (telecom) simCalls += key else simCalls -= key
         if (acts.size > 20) acts.remove(acts.keys.first())
     }
-    @Synchronized fun forget(key: String) { acts.remove(key) }
+    @Synchronized fun forget(key: String) { acts.remove(key); simCalls -= key }
     fun canTelecom(c: Context) = c.checkSelfPermission(Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED
 
     /** Press the call's own button; for the phone's own calls without one (Samsung), use Telecom directly. */
     fun act(c: Context, key: String, what: String): Boolean {
-        val m = synchronized(this) { acts[key] }
-        val pi = m?.get(what) ?: if (what == "decline") m?.get("hangup") else null
+        val m = synchronized(this) { acts[key] } ?: return false.also { android.util.Log.w("Kitbridge", "Call $what: unknown call") }
+        val pi = m[what] ?: if (what == "decline") m["hangup"] else null
         if (pi != null) return runCatching { pi.send(); android.util.Log.i("Kitbridge", "Call $what pressed"); true }.getOrDefault(false)
+        if (key !in synchronized(this) { simCalls }) return false.also { android.util.Log.w("Kitbridge", "Call $what: not a phone call, no button") }
         if (!canTelecom(c)) return false.also { android.util.Log.w("Kitbridge", "Call $what: no button, no Telecom permission") }
         return runCatching {
             val tm = c.getSystemService(android.telecom.TelecomManager::class.java)

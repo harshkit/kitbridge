@@ -9,8 +9,8 @@ android {
         applicationId = "com.harshkit.phonebridge"
         minSdk = 33 // X25519 (XDH) needs Android 13+
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.5.0"
+        versionCode = 12
+        versionName = "1.5.3"
     }
     // Release key lives outside the repo (~/.gradle/gradle.properties: PB_KEYSTORE, PB_KEYSTORE_PASSWORD).
     // Without it — e.g. a fresh clone — release builds fall back to the local debug key.

@@ -429,6 +429,8 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         a.messageText = "Call \(number)?"
         a.informativeText = "Your phone (\(phone)) will place the call. Talk on your phone or its earbuds."
         a.addButton(withTitle: "Call"); a.addButton(withTitle: "Cancel")
+        // Return means Cancel here: a link fired while you're typing must never turn Enter into a call.
+        a.buttons[0].keyEquivalent = ""; a.buttons[1].keyEquivalent = "\r"
         if a.runModal() == .alertFirstButtonReturn { placeCall(number) }
     }
 

@@ -17,8 +17,8 @@ cat > "$A/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>Kitbridge</string>
   <key>CFBundleIconFile</key><string>Kitbridge</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.5.2</string>
-  <key>CFBundleVersion</key><string>13</string>
+  <key>CFBundleShortVersionString</key><string>1.5.3</string>
+  <key>CFBundleVersion</key><string>14</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSLocalNetworkUsageDescription</key><string>Kitbridge talks to your phone on this Wi-Fi.</string>
@@ -30,7 +30,7 @@ cat > "$A/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 # A stable local identity keeps macOS permissions across rebuilds; fall back to ad-hoc.
-# A stable local certificate keeps macOS permissions (Bluetooth, notifications) across rebuilds; it needn't be
+# A stable local certificate keeps macOS permissions (notifications) across rebuilds; it needn't be
 # "trusted" to sign. Without one, fall back to ad-hoc (each build then looks like a new app to macOS).
 ID=$(security find-identity -p codesigning | grep -o '[0-9A-F]\{40\} "[^"]*Local Signing"' | head -1 | cut -d' ' -f1 || true)
 codesign --force --sign "${ID:--}" "$A"
