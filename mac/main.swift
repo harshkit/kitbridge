@@ -1,6 +1,4 @@
 import AppKit
-import CoreAudio
-import IOBluetooth
 import SwiftUI
 import ImageIO
 import UniformTypeIdentifiers
@@ -214,75 +212,6 @@ struct DeviceCard: View {
     }
 }
 
-// MARK: - Mac as the phone's Bluetooth hands-free device (call audio on the Mac)
-
-/// macOS still ships IOBluetoothHandsFreeDevice (HFP hands-free role), but its headers were removed from the
-/// SDK, so it's driven through the Objective-C runtime. The Mac then behaves like a car kit for the phone:
-/// answering or dialling from the Mac puts the call audio on the Mac; answering on the phone hands it back.
-final class HandsFree: NSObject {
-    private var hf: NSObject?
-    private(set) var connected = false
-    var callActive = false
-    var setupMode = 0               // 0 none, 1 incoming, 2 dialling, 3 remote ringing (HFP +CIEV callsetup)
-    var onChange: () -> Void = {}
-    var onCallState: () -> Void = {}
-
-    /// Phones paired with this Mac over Bluetooth (System Settings → Bluetooth).
-    static func pairedPhones() -> [IOBluetoothDevice] {
-        (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] ?? []).filter { $0.deviceClassMajor == 0x02 } // major class: phone
-    }
-
-    func connect(to device: IOBluetoothDevice) {
-        guard let cls = NSClassFromString("IOBluetoothHandsFreeDevice") as? NSObject.Type else { return log("hands-free: class missing") }
-        let obj = cls.perform(NSSelectorFromString("alloc")).takeUnretainedValue() as! NSObject
-        hf = obj.perform(NSSelectorFromString("initWithDevice:delegate:"), with: device, with: self)?.takeUnretainedValue() as? NSObject
-        log("hands-free: connecting to \(device.name ?? "phone")")
-        hf?.perform(NSSelectorFromString("connect"))
-    }
-    func disconnect() { hf?.perform(NSSelectorFromString("disconnect")); connected = false; onChange() }
-
-    func answer() { log("hands-free: accept"); hf?.perform(NSSelectorFromString("acceptCall")); audioToMac() }
-    func end() { log("hands-free: end"); hf?.perform(NSSelectorFromString("endCall")) }
-    func dial(_ n: String) { log("hands-free: dial"); hf?.perform(NSSelectorFromString("dialNumber:"), with: n as NSString); audioToMac() }
-    func audioToMac() { hf?.perform(NSSelectorFromString("transferAudioToComputer")) }
-    /// Explicitly open the voice (SCO) channel and record which audio devices macOS then offers.
-    func openVoice() {
-        log("hands-free: connectSCO requested")
-        hf?.perform(NSSelectorFromString("connectSCO"))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { log("hands-free: audio devices now \(HandsFree.audioDevices())") }
-    }
-    static func audioDevices() -> [String] {
-        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        var size: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size) == noErr else { return [] }
-        var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
-        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &ids) == noErr else { return [] }
-        return ids.compactMap { id in
-            var n: CFString = "" as CFString; var s = UInt32(MemoryLayout<CFString>.size)
-            var a = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyName, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-            return AudioObjectGetPropertyData(id, &a, 0, nil, &s, &n) == noErr ? n as String : nil
-        }
-    }
-    func audioToPhone() { log("hands-free: audio to phone"); hf?.perform(NSSelectorFromString("transferAudioToPhone")) }
-
-    // IOBluetoothHandsFreeDelegate / IOBluetoothHandsFreeDeviceDelegate (selectors from the old public header)
-    @objc func handsFree(_ d: AnyObject, connected status: NSNumber) {
-        connected = status.intValue == 0; log("hands-free: connected status \(status)"); DispatchQueue.main.async { self.onChange() }
-    }
-    @objc func handsFree(_ d: AnyObject, disconnected status: NSNumber) {
-        connected = false; log("hands-free: disconnected \(status)"); DispatchQueue.main.async { self.onChange() }
-    }
-    @objc func handsFree(_ d: AnyObject, scoConnectionOpened status: NSNumber) { log("hands-free: audio on Mac (\(status))") }
-    @objc func handsFree(_ d: AnyObject, scoConnectionClosed status: NSNumber) { log("hands-free: audio left Mac (\(status))") }
-    @objc func handsFree(_ d: AnyObject, isCallActive active: NSNumber) {
-        callActive = active.boolValue; log("hands-free: call active \(active)"); DispatchQueue.main.async { self.onCallState() }
-    }
-    @objc func handsFree(_ d: AnyObject, callSetupMode mode: NSNumber) {
-        setupMode = mode.intValue; log("hands-free: call setup \(mode)"); DispatchQueue.main.async { self.onCallState() }
-    }
-    @objc func handsFree(_ d: AnyObject, incomingCallFrom number: NSString) { log("hands-free: incoming call signalled") }
-}
-
 final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     let keyHex = loadKeyHex()
     lazy var key = SymmetricKey(data: Data((0..<32).map { i in
@@ -297,10 +226,6 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     var phoneVersion = ""
     var battery: Int? = nil, charging = false
     let call = CallModel()
-    let hands = HandsFree()
-    var macAudio = UserDefaults.standard.bool(forKey: "macAudio")  // "Use Mac for call audio"
-    var answeredOnMac = false
-    var routedThisCall = false
     var callPanel: NSPanel?   // non-nil while a call is showing
     var shownPanel: NSPanel?  // the single panel, created once and reused
     var ring: NSSound?
@@ -368,7 +293,6 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         }
         finder?.start(queue: .main)
 
-        if macAudio { DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.startHandsFree() } }
         Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [unowned self] _ in pollClipboard() }
         Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [unowned self] _ in send(["t": "ping"]) } // keeps a locked phone's link alive (it gives up after 25 s of silence)
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [unowned self] _ in checkAlerts() } // notices when you turn alerts on
@@ -393,9 +317,6 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         let dial = m.addItem(withTitle: "Call a Number…", action: #selector(askNumber), keyEquivalent: "")
         dial.image = NSImage(systemSymbolName: "phone", accessibilityDescription: nil)
         dial.isEnabled = conn != nil
-        let audio = m.addItem(withTitle: hands.connected ? "Use Mac for Call Audio (Bluetooth connected)" : "Use Mac for Call Audio (Bluetooth)",
-                              action: #selector(toggleMacAudio), keyEquivalent: "")
-        audio.state = macAudio ? .on : .off
         let def = m.addItem(withTitle: "Use Kitbridge for Phone Links", action: #selector(claimTel), keyEquivalent: "")
         def.state = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "tel:1")!)?.lastPathComponent == "Kitbridge.app" ? .on : .off
         m.addItem(.separator())
@@ -440,7 +361,6 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         call.name = j["name"] as? String ?? "Unknown"; call.app = j["app"] as? String ?? "Phone"
         call.can = j["can"] as? [String] ?? []
         if let b = j["photo"] as? String, let d = Data(base64Encoded: b) { call.photo = NSImage(data: d) }
-        if state == "active" && macAudio && hands.connected && hands.setupMode == 1 && !hands.callActive { call.state = "ringing" }
         if call.state == "active" {
             call.pending = ""
             if let ms = j["since"] as? Double, ms > 0 { call.since = Date(timeIntervalSince1970: ms / 1000) }
@@ -469,13 +389,6 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
 
     func callAct(_ a: String) {
         stopRing()
-        if macAudio && hands.connected {
-            answeredOnMac = a == "answer"
-            if a == "answer" { hands.answer() } else { hands.end() }
-            call.pending = a == "answer" ? "Answering on your Mac…" : "Ending…"
-            if a != "answer" { DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.closeCall() } }
-            return
-        }
         call.pending = a == "answer" ? "Answering on your phone…" : a == "decline" ? "Declining…" : "Ending…"
         send(["t": "callact", "id": call.id, "act": a])
         if a != "answer" { DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.closeCall() } }
@@ -514,51 +427,12 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
         a.messageText = "Call \(number)?"
-        a.informativeText = "Your phone (\(phone)) will place the call. Use your phone or its earbuds to talk."
+        a.informativeText = "Your phone (\(phone)) will place the call. Talk on your phone or its earbuds."
         a.addButton(withTitle: "Call"); a.addButton(withTitle: "Cancel")
         if a.runModal() == .alertFirstButtonReturn { placeCall(number) }
     }
 
-    /// Dial with the Mac's audio when hands-free is on, otherwise ask the phone to dial.
-    func placeCall(_ n: String) {
-        if macAudio && hands.connected { answeredOnMac = true; hands.dial(n) } else { log("dial sent"); send(["t": "dial", "number": n]) }
-    }
-
-    @objc func toggleMacAudio() {
-        macAudio.toggle(); UserDefaults.standard.set(macAudio, forKey: "macAudio")
-        if macAudio { startHandsFree() } else { hands.disconnect() }
-        refresh()
-    }
-
-    /// Bluetooth calls can block on macOS's permission prompt, so they never run on the main thread.
-    func startHandsFree() {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let phones = HandsFree.pairedPhones()
-            DispatchQueue.main.async { self?.startHandsFree(with: phones) }
-        }
-    }
-
-    func startHandsFree(with phones: [IOBluetoothDevice]) {
-        log("hands-free: paired phones \(phones.map { $0.name ?? "?" })")
-        guard let p = phones.first(where: { ($0.name ?? "").localizedCaseInsensitiveContains(phone) || phone.contains($0.name ?? "#") }) ?? phones.first else {
-            NSApp.activate(ignoringOtherApps: true)
-            let a = NSAlert(); a.messageText = "Pair your phone with this Mac over Bluetooth"
-            a.informativeText = "On your phone: Settings → Connections → Bluetooth, tap this Mac and confirm the code. Allow \"Calls\" for it. Then turn this on again."
-            a.addButton(withTitle: "Open Bluetooth Settings"); a.addButton(withTitle: "Later")
-            if a.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings")!) }
-            macAudio = false; UserDefaults.standard.set(false, forKey: "macAudio"); refresh(); return
-        }
-        hands.onChange = { [weak self] in self?.refresh() }
-        // Bluetooth's own call state decides where audio goes: a call that becomes active without you
-        // answering or dialling on the Mac was picked up on the phone, so its audio goes back to the phone.
-        hands.onCallState = { [weak self] in
-            guard let self else { return }
-            if hands.callActive && !answeredOnMac && !routedThisCall { routedThisCall = true; hands.audioToPhone() }
-            if hands.callActive && answeredOnMac && !routedThisCall { routedThisCall = true; hands.openVoice() }
-            if !hands.callActive && hands.setupMode == 0 { answeredOnMac = false; routedThisCall = false }
-        }
-        hands.connect(to: p)
-    }
+    func placeCall(_ n: String) { log("dial sent"); send(["t": "dial", "number": n]) }
 
     @objc func askDiag() { log("diagnostics requested"); send(["t": "diag"]) }
 

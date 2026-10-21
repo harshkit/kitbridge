@@ -2,7 +2,7 @@
 # Builds Kitbridge.app and installs it to /Applications.
 set -euo pipefail
 cd "$(dirname "$0")"
-swiftc -O main.swift -o /tmp/Kitbridge-bin -framework AppKit -framework SwiftUI -framework IOBluetooth
+swiftc -O main.swift -o /tmp/Kitbridge-bin -framework AppKit -framework SwiftUI
 swiftc -O -D TEST main.swift -o /tmp/Kitbridge-test 2>/dev/null && /tmp/Kitbridge-test --test
 A=build/Kitbridge.app
 rm -rf "$A"; mkdir -p "$A/Contents/MacOS" "$A/Contents/Resources"
@@ -17,8 +17,8 @@ cat > "$A/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>Kitbridge</string>
   <key>CFBundleIconFile</key><string>Kitbridge</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.5.1</string>
-  <key>CFBundleVersion</key><string>12</string>
+  <key>CFBundleShortVersionString</key><string>1.5.2</string>
+  <key>CFBundleVersion</key><string>13</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSLocalNetworkUsageDescription</key><string>Kitbridge talks to your phone on this Wi-Fi.</string>
@@ -26,7 +26,6 @@ cat > "$A/Contents/Info.plist" <<PLIST
     <key>CFBundleURLName</key><string>Phone call</string>
     <key>CFBundleURLSchemes</key><array><string>tel</string></array>
   </dict></array>
-  <key>NSBluetoothAlwaysUsageDescription</key><string>Kitbridge connects to your phone over Bluetooth as a hands-free device, so calls you answer or place on the Mac use the Mac's microphone and speakers.</string>
   <key>NSBonjourServices</key><array><string>_phonebridge._tcp</string></array>
 </dict></plist>
 PLIST
