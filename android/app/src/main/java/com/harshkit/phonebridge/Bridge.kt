@@ -116,6 +116,22 @@ object Link {
     }
 
     const val PORT = 47811
+
+    /** The name you gave the phone (Settings → About phone), e.g. "Harsh's S26 Ultra"; else the model. */
+    private fun deviceName() = Settings.Global.getString(ctx.contentResolver, "device_name")?.takeIf { it.isNotBlank() } ?: Build.MODEL
+
+    private var lastBattery = -1
+    /** Battery level and charging state for the Mac's device card; sent when the level changes. */
+    fun sendBattery(force: Boolean = false) {
+        val i = ctx.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return
+        val level = i.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) * 100 / maxOf(1, i.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100))
+        val st = i.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, 0)
+        val charging = st == android.os.BatteryManager.BATTERY_STATUS_CHARGING || st == android.os.BatteryManager.BATTERY_STATUS_FULL
+        val key = level * 2 + if (charging) 1 else 0
+        if (!force && key == lastBattery) return
+        lastBattery = key
+        send(JSONObject().put("t", "battery").put("level", level).put("charging", charging))
+    }
     private val wake = java.util.concurrent.Semaphore(0)
     /** Sleep, but wake at once when Wi-Fi comes back, the screen turns on, or a Mac code is entered. */
     private fun nap(ms: Long) { wake.drainPermits(); wake.tryAcquire(ms, TimeUnit.MILLISECONDS) }
@@ -191,6 +207,9 @@ object Link {
         ctx.registerReceiver(object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) = kick()
         }, android.content.IntentFilter().apply { addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT) })
+        ctx.registerReceiver(object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { if (connected) sendBattery() }
+        }, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
     }
 
     private fun discover(): Pair<String, Int> {
@@ -269,7 +288,8 @@ object Link {
             var rx = 0L
 
             sendQ.submit { tx = 0; session = SecretKeySpec(sk, "AES"); out = o }.get()
-            send(JSONObject().put("t", "hello").put("name", Build.MODEL))
+            send(JSONObject().put("t", "hello").put("name", deviceName()))
+            sendBattery(force = true)
             thread { BridgeService.instance?.resync() } // catch up on anything posted while disconnected
             prefs.edit().putString("host", host).putInt("port", port).apply()
             status = "Connected to Mac ($host)"
@@ -319,6 +339,12 @@ object Link {
         when (j.optString("t")) {
             "pong" -> { rttMs = (System.nanoTime() - j.getLong("ts")) / 1_000_000; return }
             "hello" -> { macName = j.optString("name"); publishShareShortcut(ctx); return }
+            "callact" -> {
+                val ok = Calls.act(ctx, j.getString("id"), j.getString("act"))
+                send(JSONObject().put("t", "callacted").put("id", j.getString("id")).put("act", j.getString("act")).put("ok", ok))
+                return
+            }
+            "dial" -> { send(JSONObject().put("t", "dialed").put("ok", Calls.dial(ctx, j.getString("number")))); return }
             "reply" -> {
                 val ok = Replies.send(ctx, j.getString("id"), j.getString("text"))
                 send(JSONObject().put("t", "replied").put("id", j.getString("id")).put("ok", ok))
@@ -397,6 +423,7 @@ class BridgeService : NotificationListenerService() {
         if (title.isEmpty() && text.isEmpty()) return
         val pkg = sbn.packageName
         val app = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
+        if (cat == "call") return forwardCall(sbn, app, title, text, live)
         if (live) {
             Link.bump(if (cat == "call") "calls" else if (cat == "msg") "msgs" else "apps")
             if (cat != "app") History.add(if (cat == "call") "calls" else "msgs", JSONObject().put("app", app).put("title", title).put("text", text))
@@ -439,7 +466,52 @@ class BridgeService : NotificationListenerService() {
         return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
     }
 
+    /**
+     * Calls get their own message so the Mac can show a phone-style panel: ringing (Accept / Decline),
+     * dialling ("Calling…") or active (timer + End). Uses Android's CallStyle data when the dialer
+     * provides it, and falls back to the notification's own buttons by label.
+     */
+    private fun forwardCall(sbn: StatusBarNotification, app: String, title: String, text: String, live: Boolean) {
+        val n = sbn.notification; val e = n.extras
+        fun byLabel(vararg words: String) = n.actions?.firstOrNull { a ->
+            val t = a.title?.toString().orEmpty(); words.any { t.contains(it, ignoreCase = true) } }?.actionIntent
+        @Suppress("DEPRECATION")
+        fun extra(k: String) = e.getParcelable(k) as? android.app.PendingIntent
+        val answer = extra(Notification.EXTRA_ANSWER_INTENT) ?: byLabel("answer", "accept")
+        val decline = extra(Notification.EXTRA_DECLINE_INTENT) ?: byLabel("decline", "reject")
+        val hangup = extra(Notification.EXTRA_HANG_UP_INTENT) ?: byLabel("hang up", "end call", "end")
+        val type = e.getInt(Notification.EXTRA_CALL_TYPE, 0) // 1 incoming, 2 ongoing, 3 screening
+        val chrono = e.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER) || n.`when` > 0 && n.flags and Notification.FLAG_ONGOING_EVENT != 0 && e.containsKey("android.chronometerCountDown")
+        val state = when {
+            type == 1 || type == 3 || (answer != null && hangup == null) -> "ringing"
+            text.contains("dial", true) || text.contains("calling", true) || text.contains("connecting", true) -> "dialing"
+            else -> "active"
+        }
+        Calls.remember(sbn.key, answer, decline, hangup)
+        if (live && state == "ringing") {
+            Link.bump("calls")
+            History.add("calls", JSONObject().put("app", app).put("title", title).put("text", text))
+        }
+        android.util.Log.i("Kitbridge", "Call $state ($app)")
+        val j = JSONObject().put("t", "call").put("id", sbn.key).put("state", state).put("app", app).put("pkg", sbn.packageName)
+            .put("name", title.ifEmpty { app }).put("detail", text)
+            .put("since", if (state == "active" && (chrono || e.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))) n.`when` else 0L)
+            .put("can", org.json.JSONArray().apply {
+                if (answer != null) put("answer"); if (decline != null) put("decline"); if (hangup != null) put("hangup")
+            })
+        runCatching { avatar(n.getLargeIcon()?.loadDrawable(this), packageManager.getApplicationIcon(sbn.packageName)) }
+            .getOrNull()?.let { j.put("photo", it) }
+        // How this dialer builds its call notification (button labels and CallStyle fields, no personal data),
+        // logged on the Mac so call handling can be checked against real devices.
+        j.put("shape", JSONObject().put("callType", type).put("category", n.category).put("ongoing", sbn.isOngoing)
+            .put("answerExtra", extra(Notification.EXTRA_ANSWER_INTENT) != null).put("declineExtra", extra(Notification.EXTRA_DECLINE_INTENT) != null)
+            .put("hangUpExtra", extra(Notification.EXTRA_HANG_UP_INTENT) != null).put("chronometer", e.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
+            .put("buttons", org.json.JSONArray(n.actions.orEmpty().map { it.title?.toString().orEmpty() })))
+        Link.send(j)
+    }
+
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        Calls.forget(sbn.key)
         Replies.forget(sbn.key)
         Link.send(JSONObject().put("t", "notif_rm").put("id", sbn.key))
     }
@@ -707,6 +779,30 @@ class ImageProvider : ContentProvider() {
  * (RemoteInput) on their notifications; we keep it and, when the Mac sends text, fire it exactly
  * as the notification shade would.
  */
+/** The phone's own call buttons, kept per call notification, pressed when you click them on the Mac. */
+object Calls {
+    private val acts = HashMap<String, Map<String, android.app.PendingIntent?>>()
+    @Synchronized fun remember(key: String, answer: android.app.PendingIntent?, decline: android.app.PendingIntent?, hangup: android.app.PendingIntent?) {
+        acts[key] = mapOf("answer" to answer, "decline" to decline, "hangup" to hangup)
+        if (acts.size > 20) acts.remove(acts.keys.first())
+    }
+    @Synchronized fun forget(key: String) { acts.remove(key) }
+    fun act(c: Context, key: String, what: String): Boolean {
+        val pi = synchronized(this) { acts[key]?.get(what) } ?: return false.also { android.util.Log.w("Kitbridge", "Call $what: no button") }
+        return runCatching { pi.send(); android.util.Log.i("Kitbridge", "Call $what pressed"); true }.getOrDefault(false)
+    }
+
+    /** "Call from Mac": dial on the phone. Needs CALL_PHONE (granted by setup); otherwise opens the dialer filled in. */
+    fun dial(c: Context, number: String): Boolean {
+        val num = number.trim()
+        if (!num.matches(Regex("""[0-9+*#() .\-]{3,32}"""))) return false
+        val granted = c.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+        val i = Intent(if (granted) Intent.ACTION_CALL else Intent.ACTION_DIAL, Uri.fromParts("tel", num, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { c.startActivity(i); android.util.Log.i("Kitbridge", "Dialing from Mac"); true }.getOrDefault(false)
+    }
+}
+
 object Replies {
     private val actions = object : LinkedHashMap<String, Notification.Action>() {
         override fun removeEldestEntry(e: MutableMap.MutableEntry<String, Notification.Action>) = size > 200

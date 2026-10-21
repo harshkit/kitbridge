@@ -2,7 +2,7 @@
 # Builds Kitbridge.app and installs it to /Applications.
 set -euo pipefail
 cd "$(dirname "$0")"
-swiftc -O main.swift -o /tmp/Kitbridge-bin -framework AppKit
+swiftc -O main.swift -o /tmp/Kitbridge-bin -framework AppKit -framework SwiftUI
 swiftc -O -D TEST main.swift -o /tmp/Kitbridge-test 2>/dev/null && /tmp/Kitbridge-test --test
 A=build/Kitbridge.app
 rm -rf "$A"; mkdir -p "$A/Contents/MacOS" "$A/Contents/Resources"
@@ -17,11 +17,15 @@ cat > "$A/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>Kitbridge</string>
   <key>CFBundleIconFile</key><string>Kitbridge</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.3.1</string>
-  <key>CFBundleVersion</key><string>7</string>
+  <key>CFBundleShortVersionString</key><string>1.4.0</string>
+  <key>CFBundleVersion</key><string>8</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSLocalNetworkUsageDescription</key><string>Kitbridge talks to your phone on this Wi-Fi.</string>
+  <key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleURLName</key><string>Phone call</string>
+    <key>CFBundleURLSchemes</key><array><string>tel</string></array>
+  </dict></array>
   <key>NSBonjourServices</key><array><string>_phonebridge._tcp</string></array>
 </dict></plist>
 PLIST

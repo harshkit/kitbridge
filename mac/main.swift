@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import ImageIO
 import UniformTypeIdentifiers
 import CryptoKit
@@ -91,6 +92,126 @@ final class Session {
 let toMac: UInt8 = 1, toPhone: UInt8 = 2
 func nonce(_ dir: UInt8, _ n: UInt64) -> Data { Data([dir, 0, 0, 0]) + withUnsafeBytes(of: n.bigEndian) { Data($0) } }
 
+extension String { func ifEmpty(_ d: String) -> String { isEmpty ? d : self } }
+
+// MARK: - iPhone-style call panel and device card
+
+/// One live call as the phone describes it.
+final class CallModel: ObservableObject {
+    @Published var id = ""
+    @Published var name = ""
+    @Published var app = ""
+    @Published var state = "ringing"
+    @Published var photo: NSImage? = nil
+    @Published var can: [String] = []
+    @Published var since: Date? = nil
+    @Published var pending = ""
+}
+
+/// Floating dark-glass card in the top-right corner, modelled on how a Mac shows an iPhone call.
+struct CallView: View {
+    @ObservedObject var m: CallModel
+    var act: (String) -> Void
+    @State private var now = Date()
+    @State private var pulse = false
+    private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                if m.state == "ringing" {
+                    Circle().stroke(Color.green.opacity(0.55), lineWidth: 2)
+                        .frame(width: 52, height: 52).scaleEffect(pulse ? 1.25 : 1).opacity(pulse ? 0 : 1)
+                        .animation(.easeOut(duration: 1.4).repeatForever(autoreverses: false), value: pulse)
+                }
+                Group {
+                    if let p = m.photo { Image(nsImage: p).resizable().scaledToFill() }
+                    else {
+                        ZStack {
+                            Circle().fill(LinearGradient(colors: [Color(white: 0.62), Color(white: 0.42)], startPoint: .top, endPoint: .bottom))
+                            Text(initials).font(.system(size: 19, weight: .semibold, design: .rounded)).foregroundStyle(.white)
+                        }
+                    }
+                }
+                .frame(width: 48, height: 48).clipShape(Circle())
+            }
+            .frame(width: 56, height: 56)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(m.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            if m.state == "ringing" {
+                if m.can.contains("decline") { round("phone.down.fill", .red, "Decline") { act("decline") } }
+                if m.can.contains("answer") { round("phone.fill", .green, "Accept") { act("answer") } }
+            } else if m.can.contains("hangup") {
+                round("phone.down.fill", .red, "End") { act("hangup") }
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .frame(width: 372)
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.black.opacity(0.82)))  // near-black, like the iPhone call card on a Mac
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(.white.opacity(0.12)))
+        .environment(\.colorScheme, .dark)
+        .onReceive(tick) { now = $0 }
+        .onAppear { pulse = true }
+    }
+
+    private var initials: String {
+        let parts = m.name.split(separator: " ").filter { $0.first?.isLetter == true }
+        return parts.prefix(2).compactMap { $0.first.map(String.init) }.joined().uppercased().ifEmpty("#")
+    }
+
+    private var subtitle: String {
+        if !m.pending.isEmpty { return m.pending }
+        switch m.state {
+        case "ringing": return m.app == "Phone" || m.app.isEmpty ? "Incoming call · mobile" : "\(m.app) audio · incoming"
+        case "dialing": return "Calling…"
+        default:
+            guard let s = m.since else { return m.app == "Phone" ? "On call" : "On \(m.app) call" }
+            let t = max(0, Int(now.timeIntervalSince(s)))
+            return String(format: "%d:%02d", t / 60, t % 60)
+        }
+    }
+
+    private func round(_ symbol: String, _ color: Color, _ label: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                .frame(width: 42, height: 42).background(Circle().fill(color.gradient))
+        }
+        .buttonStyle(.plain).help(label).accessibilityLabel(label)
+    }
+}
+
+/// The phone shown as a connected device at the top of the menu, like AirPods or an iPhone.
+struct DeviceCard: View {
+    let name: String, connected: Bool, battery: Int?, charging: Bool, onCall: Bool
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(connected ? (onCall ? Color.green : Color.accentColor) : Color.gray.opacity(0.5)).frame(width: 34, height: 34)
+                Image(systemName: onCall ? "phone.fill" : "smartphone").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(connected ? name : "Phone not connected").font(.system(size: 13, weight: .semibold))
+                Text(onCall ? "On a call" : connected ? "Connected · Kitbridge" : "Same Wi-Fi needed")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if connected, let b = battery {
+                HStack(spacing: 3) {
+                    if charging { Image(systemName: "bolt.fill").font(.system(size: 9)).foregroundStyle(.green) }
+                    Text("\(b)%").font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary)
+                    Image(systemName: b > 87 ? "battery.100percent" : b > 62 ? "battery.75percent" : b > 37 ? "battery.50percent" : b > 12 ? "battery.25percent" : "battery.0percent")
+                        .foregroundStyle(b <= 12 && !charging ? .red : .secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8).frame(width: 300)
+    }
+}
+
 final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     let keyHex = loadKeyHex()
     lazy var key = SymmetricKey(data: Data((0..<32).map { i in
@@ -102,6 +223,10 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     var pending = [Session]() // strangers still inside their 5-second handshake window, oldest first
     var conn: Session? // the live phone; set only once it has sent a valid session frame
     var phone = ""
+    var battery: Int? = nil, charging = false
+    let call = CallModel()
+    var callPanel: NSPanel?
+    var ring: NSSound?
     var alertsOff = false // macOS notifications for Kitbridge are turned off
     // Alerts already shown, kept across restarts so a reconnect's catch-up never re-shows ones you cleared.
     // Stored as id → "HMAC-SHA256(pairing key, content)|time": keyed fingerprints, never text, and not guessable without the key.
@@ -175,10 +300,24 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     // MARK: menu
 
     func refresh() {
-        item.button?.image = NSImage(systemSymbolName: conn == nil ? "iphone.slash" : "iphone.radiowaves.left.and.right",
+        let onCall = callPanel != nil
+        item.button?.image = NSImage(systemSymbolName: onCall ? "phone.fill" : conn == nil ? "iphone.slash" : "iphone.radiowaves.left.and.right",
                                      accessibilityDescription: "Kitbridge")
+        item.button?.contentTintColor = onCall ? .systemGreen : nil
         let m = NSMenu()
-        m.addItem(withTitle: conn == nil ? "Waiting for phone…" : "Connected: \(phone)", action: nil, keyEquivalent: "")
+        let card = NSMenuItem()
+        let host = NSHostingView(rootView: DeviceCard(name: phone.isEmpty ? "Phone" : phone, connected: conn != nil,
+                                                      battery: battery, charging: charging, onCall: callPanel != nil))
+        host.frame = NSRect(x: 0, y: 0, width: 300, height: 52)
+        card.view = host
+        m.addItem(card)
+        m.addItem(.separator())
+        let dial = m.addItem(withTitle: "Call a Number…", action: #selector(askNumber), keyEquivalent: "")
+        dial.image = NSImage(systemSymbolName: "phone", accessibilityDescription: nil)
+        dial.isEnabled = conn != nil
+        let def = m.addItem(withTitle: "Use Kitbridge for Phone Links", action: #selector(claimTel), keyEquivalent: "")
+        def.state = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "tel:1")!)?.lastPathComponent == "Kitbridge.app" ? .on : .off
+        m.addItem(.separator())
         if let ip = localIPv4() {
             let code = m.addItem(withTitle: "Connect code: \(ip.split(separator: ".").last ?? "")   (\(ip))", action: nil, keyEquivalent: "")
             code.toolTip = "If your phone can't find this Mac, open Kitbridge on the phone → Enter Mac code."
@@ -206,6 +345,104 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     }
     @objc func openAlertSettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
+    }
+
+    // MARK: calls
+
+    func showCall(_ j: [String: Any]) {
+        guard let id = j["id"] as? String else { return }
+        let state = j["state"] as? String ?? "ringing"
+        if call.id != id { call.pending = "" }
+        call.id = id; call.state = state
+        call.name = j["name"] as? String ?? "Unknown"; call.app = j["app"] as? String ?? "Phone"
+        call.can = j["can"] as? [String] ?? []
+        if let b = j["photo"] as? String, let d = Data(base64Encoded: b) { call.photo = NSImage(data: d) }
+        if state == "active" {
+            call.pending = ""
+            if let ms = j["since"] as? Double, ms > 0 { call.since = Date(timeIntervalSince1970: ms / 1000) }
+            else if call.since == nil { call.since = Date() }
+        } else { call.since = nil }
+        log("call \(state) from \(call.app); shape \((j["shape"] as? [String: Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }.map { String(decoding: $0, as: UTF8.self) } ?? "-")")
+        if state == "ringing" { startRing() } else { stopRing() }
+        if callPanel == nil {
+            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 372, height: 80), styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+            p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = true
+            p.level = .statusBar; p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+            p.isMovableByWindowBackground = true
+            let v = NSHostingView(rootView: CallView(m: call) { [unowned self] a in callAct(a) })
+            p.contentView = v
+            let size = v.fittingSize
+            if let f = NSScreen.main?.visibleFrame {
+                p.setFrame(NSRect(x: f.maxX - size.width - 14, y: f.maxY - size.height - 10, width: size.width, height: size.height), display: true)
+            }
+            p.alphaValue = 0; p.orderFrontRegardless()
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.25; p.animator().alphaValue = 1 }
+            callPanel = p; refresh()
+        }
+    }
+
+    func callAct(_ a: String) {
+        stopRing()
+        call.pending = a == "answer" ? "Answering on your phone…" : a == "decline" ? "Declining…" : "Ending…"
+        send(["t": "callact", "id": call.id, "act": a])
+        if a != "answer" { DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.closeCall() } }
+    }
+
+    func closeCall() {
+        stopRing()
+        guard let p = callPanel else { return }
+        callPanel = nil; call.id = ""; refresh()
+        NSAnimationContext.runAnimationGroup({ $0.duration = 0.2; p.animator().alphaValue = 0 }, completionHandler: { p.orderOut(nil) })
+    }
+
+    func startRing() {
+        guard ring == nil else { return }
+        let url = URL(fileURLWithPath: "/System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/Ringtones/Opening.m4r")
+        ring = NSSound(contentsOf: url, byReference: true) ?? NSSound(named: "Glass")
+        ring?.loops = true; ring?.play()
+    }
+    func stopRing() { ring?.stop(); ring = nil }
+
+    func notice(_ title: String, _ body: String) {
+        let c = UNMutableNotificationContent(); c.title = title; c.body = body
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
+    }
+
+    /// Dial on the phone, always after you confirm on the Mac (phone links can come from any app or web page).
+    func confirmDial(_ raw: String) {
+        let number = raw.replacingOccurrences(of: "tel:", with: "").removingPercentEncoding ?? raw
+        guard number.range(of: #"^[0-9+*#() .\-]{3,32}$"#, options: .regularExpression) != nil else { return }
+        guard conn != nil else { return notice("Your phone isn't connected", "Kitbridge needs your phone on the same Wi-Fi.") }
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert()
+        a.messageText = "Call \(number)?"
+        a.informativeText = "Your phone (\(phone)) will place the call. Use your phone or its earbuds to talk."
+        a.addButton(withTitle: "Call"); a.addButton(withTitle: "Cancel")
+        if a.runModal() == .alertFirstButtonReturn { send(["t": "dial", "number": number]) }
+    }
+
+    @objc func askNumber() {
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert(); a.messageText = "Call a Number"; a.informativeText = "Your phone will dial it."
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24)); f.placeholderString = "+91 98765 43210"
+        a.accessoryView = f; a.addButton(withTitle: "Call"); a.addButton(withTitle: "Cancel")
+        a.window.initialFirstResponder = f
+        if a.runModal() == .alertFirstButtonReturn, !f.stringValue.isEmpty {
+            let n = f.stringValue.trimmingCharacters(in: .whitespaces)
+            if n.range(of: #"^[0-9+*#() .\-]{3,32}$"#, options: .regularExpression) != nil, conn != nil { send(["t": "dial", "number": n]) }
+        }
+    }
+
+    /// Makes Kitbridge open tel: links (macOS asks you to confirm).
+    @objc func claimTel() {
+        NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpenURLsWithScheme: "tel") { [weak self] _ in
+            DispatchQueue.main.async { self?.refresh() }
+        }
+    }
+
+    func application(_ app: NSApplication, open urls: [URL]) {
+        urls.filter { $0.scheme == "tel" }.forEach { confirmDial($0.absoluteString) }
     }
 
     @objc func toggleClip() { syncClipboard.toggle(); UserDefaults.standard.set(syncClipboard, forKey: "clip"); refresh() }
@@ -285,6 +522,14 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         switch j["t"] as? String {
         case "ping":
             send(["t": "pong", "ts": j["ts"] ?? 0])
+        case "battery":
+            battery = j["level"] as? Int; charging = j["charging"] as? Bool ?? false; refresh()
+        case "call":
+            showCall(j)
+        case "callacted":
+            if j["ok"] as? Bool != true, (j["id"] as? String) == call.id { call.pending = "Couldn't reach the phone's call buttons" }
+        case "dialed":
+            if j["ok"] as? Bool != true { notice("Couldn't start the call", "Check that Kitbridge is set up on your phone.") }
         case "hello":
             phone = j["name"] as? String ?? "Phone"; refresh()
         case "notif":
@@ -339,6 +584,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         case "notif_rm":
             guard let id = j["id"] as? String else { return }
+            if id == call.id { closeCall() }
             // Keep the fingerprint: apps often remove and re-post the same notification when refreshing it.
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id])
         case "clip":

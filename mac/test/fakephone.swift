@@ -83,6 +83,20 @@ if a.count > 4 && a[3] == "img" {
     exit(0)
 }
 
+// `fakephone <key> <port> call`: a demo incoming call (Maya), then active, then hang-up — for checking the Mac panel.
+if a.count > 3 && a[3] == "call" {
+    let r = Conn(); precondition(r.handshake())
+    r.send(["t": "hello", "name": "Galaxy S26 Ultra"])
+    r.send(["t": "battery", "level": 82, "charging": true])
+    let base = ["t": "call", "id": "demo-call", "app": "Phone", "pkg": "com.samsung.android.incallui", "name": "Maya", "detail": "Incoming call"] as [String: Any]
+    r.send(base.merging(["state": "ringing", "can": ["answer", "decline"]]) { $1 })
+    sleep(UInt32(a.count > 4 ? Int(a[4]) ?? 6 : 6))
+    r.send(base.merging(["state": "active", "can": ["hangup"], "since": Date().timeIntervalSince1970 * 1000 - 42_000]) { $1 })
+    sleep(UInt32(a.count > 4 ? Int(a[4]) ?? 6 : 6))
+    r.send(["t": "notif_rm", "id": "demo-call"])
+    sleep(1); exit(0)
+}
+
 let c = Conn(); precondition(c.handshake(), "handshake failed")
 print("✓ X25519 handshake, fresh session key")
 c.send(["t": "hello", "name": "Fake S26"])

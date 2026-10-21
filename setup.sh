@@ -46,6 +46,7 @@ ok adb shell pm grant "$P" android.permission.READ_LOGS                     # ba
 ok adb shell appops set "$P" SYSTEM_ALERT_WINDOW allow                      # invisible clipboard reader
 ok adb shell pm grant "$P" android.permission.RECEIVE_SMS                   # full SMS text incl. OTP
 ok adb shell pm grant "$P" android.permission.POST_NOTIFICATIONS            # "Turn on copy to Mac" reminder
+ok adb shell pm grant "$P" android.permission.CALL_PHONE                    # call a number from the Mac
 ok adb shell appops set "$P" RECEIVE_SENSITIVE_NOTIFICATIONS allow          # Android 15+: unredacted OTPs
 ok adb shell appops set "$P" RUN_ANY_IN_BACKGROUND allow
 ok adb shell dumpsys deviceidle whitelist +"$P"                             # no battery-saver disconnects
