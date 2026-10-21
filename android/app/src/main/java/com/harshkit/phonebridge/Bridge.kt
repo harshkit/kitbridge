@@ -508,8 +508,14 @@ class BridgeService : NotificationListenerService() {
         // "Incoming call", with no Answer button (its own full-screen UI answers); dialling out is text
         // "Calling…"; once connected the text is empty and `when` is the connect time. Standard dialers
         // use type 1 + EXTRA_ANSWER_INTENT. Handle both.
+        // For the phone's own SIM calls, Android's telephony state is the ground truth (Samsung's first
+        // notification for a ringing call has empty text, like a connected one).
+        val ringingNow = sbn.packageName.contains("incallui") || sbn.packageName.contains("dialer") || sbn.packageName == "com.android.server.telecom"
+        val simRinging = ringingNow && runCatching {
+            @Suppress("DEPRECATION") getSystemService(android.telephony.TelephonyManager::class.java).callState == android.telephony.TelephonyManager.CALL_STATE_RINGING
+        }.getOrDefault(false)
         val state = when {
-            type == 1 || type == 3 || text.contains("incoming", true) || (answer != null && hangup == null) -> "ringing"
+            simRinging || type == 1 || type == 3 || text.contains("incoming", true) || (answer != null && hangup == null) -> "ringing"
             listOf("calling", "dial", "connecting", "ringing").any { text.contains(it, true) } -> "dialing"
             else -> "active"
         }

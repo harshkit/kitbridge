@@ -222,7 +222,9 @@ final class HandsFree: NSObject {
     private var hf: NSObject?
     private(set) var connected = false
     var callActive = false
+    var setupMode = 0               // 0 none, 1 incoming, 2 dialling, 3 remote ringing (HFP +CIEV callsetup)
     var onChange: () -> Void = {}
+    var onCallState: () -> Void = {}
 
     /// Phones paired with this Mac over Bluetooth (System Settings → Bluetooth).
     static func pairedPhones() -> [IOBluetoothDevice] {
@@ -253,8 +255,12 @@ final class HandsFree: NSObject {
     }
     @objc func handsFree(_ d: AnyObject, scoConnectionOpened status: NSNumber) { log("hands-free: audio on Mac (\(status))") }
     @objc func handsFree(_ d: AnyObject, scoConnectionClosed status: NSNumber) { log("hands-free: audio left Mac (\(status))") }
-    @objc func handsFree(_ d: AnyObject, isCallActive active: NSNumber) { callActive = active.boolValue; log("hands-free: call active \(active)") }
-    @objc func handsFree(_ d: AnyObject, callSetupMode mode: NSNumber) { log("hands-free: call setup \(mode)") }
+    @objc func handsFree(_ d: AnyObject, isCallActive active: NSNumber) {
+        callActive = active.boolValue; log("hands-free: call active \(active)"); DispatchQueue.main.async { self.onCallState() }
+    }
+    @objc func handsFree(_ d: AnyObject, callSetupMode mode: NSNumber) {
+        setupMode = mode.intValue; log("hands-free: call setup \(mode)"); DispatchQueue.main.async { self.onCallState() }
+    }
     @objc func handsFree(_ d: AnyObject, incomingCallFrom number: NSString) { log("hands-free: incoming call signalled") }
 }
 
@@ -275,6 +281,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     let hands = HandsFree()
     var macAudio = UserDefaults.standard.bool(forKey: "macAudio")  // "Use Mac for call audio"
     var answeredOnMac = false
+    var routedThisCall = false
     var callPanel: NSPanel?   // non-nil while a call is showing
     var shownPanel: NSPanel?  // the single panel, created once and reused
     var ring: NSSound?
@@ -414,14 +421,14 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         call.name = j["name"] as? String ?? "Unknown"; call.app = j["app"] as? String ?? "Phone"
         call.can = j["can"] as? [String] ?? []
         if let b = j["photo"] as? String, let d = Data(base64Encoded: b) { call.photo = NSImage(data: d) }
-        if state == "active" {
-            if macAudio && hands.connected && !answeredOnMac && call.since == nil { hands.audioToPhone() } // picked up on the phone
+        if state == "active" && macAudio && hands.connected && hands.setupMode == 1 && !hands.callActive { call.state = "ringing" }
+        if call.state == "active" {
             call.pending = ""
             if let ms = j["since"] as? Double, ms > 0 { call.since = Date(timeIntervalSince1970: ms / 1000) }
             else if call.since == nil { call.since = Date() }
         } else { call.since = nil }
         log("call \(state) from \(call.app); shape \((j["shape"] as? [String: Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }.map { String(decoding: $0, as: UTF8.self) } ?? "-")")
-        if state == "ringing" { startRing() } else { stopRing() }
+        if call.state == "ringing" { startRing() } else { stopRing() }
         if callPanel == nil {
             if let old = shownPanel { old.alphaValue = 1; old.orderFrontRegardless(); callPanel = old; refresh(); return }
             let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 372, height: 80), styleMask: [.borderless, .nonactivatingPanel],
@@ -458,7 +465,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     func closeCall() {
         stopRing()
         guard let p = callPanel else { return }
-        callPanel = nil; call.id = ""; call.since = nil; answeredOnMac = false; refresh()
+        callPanel = nil; call.id = ""; call.since = nil; refresh()
         NSAnimationContext.runAnimationGroup({ $0.duration = 0.2; p.animator().alphaValue = 0 },
                                              completionHandler: { [weak self] in if self?.callPanel == nil { p.orderOut(nil) } })
     }
@@ -516,6 +523,13 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
             macAudio = false; UserDefaults.standard.set(false, forKey: "macAudio"); refresh(); return
         }
         hands.onChange = { [weak self] in self?.refresh() }
+        // Bluetooth's own call state decides where audio goes: a call that becomes active without you
+        // answering or dialling on the Mac was picked up on the phone, so its audio goes back to the phone.
+        hands.onCallState = { [weak self] in
+            guard let self else { return }
+            if hands.callActive && !answeredOnMac && !routedThisCall { routedThisCall = true; hands.audioToPhone() }
+            if !hands.callActive && hands.setupMode == 0 { answeredOnMac = false; routedThisCall = false }
+        }
         hands.connect(to: p)
     }
 
