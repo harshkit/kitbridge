@@ -186,7 +186,7 @@ struct CallView: View {
 
 /// The phone shown as a connected device at the top of the menu, like AirPods or an iPhone.
 struct DeviceCard: View {
-    let name: String, connected: Bool, battery: Int?, charging: Bool, onCall: Bool
+    let name: String, connected: Bool, battery: Int?, charging: Bool, onCall: Bool, version: String
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
@@ -195,7 +195,7 @@ struct DeviceCard: View {
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(connected ? name : "Phone not connected").font(.system(size: 13, weight: .semibold))
-                Text(onCall ? "On a call" : connected ? "Connected · Kitbridge" : "Same Wi-Fi needed")
+                Text(onCall ? "On a call" : connected ? "Connected · Kitbridge \(version)" : "Same Wi-Fi needed")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             Spacer()
@@ -223,6 +223,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
     var pending = [Session]() // strangers still inside their 5-second handshake window, oldest first
     var conn: Session? // the live phone; set only once it has sent a valid session frame
     var phone = ""
+    var phoneVersion = ""
     var battery: Int? = nil, charging = false
     let call = CallModel()
     var callPanel: NSPanel?
@@ -307,7 +308,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         let m = NSMenu()
         let card = NSMenuItem()
         let host = NSHostingView(rootView: DeviceCard(name: phone.isEmpty ? "Phone" : phone, connected: conn != nil,
-                                                      battery: battery, charging: charging, onCall: callPanel != nil))
+                                                      battery: battery, charging: charging, onCall: callPanel != nil, version: phoneVersion))
         host.frame = NSRect(x: 0, y: 0, width: 300, height: 52)
         card.view = host
         m.addItem(card)
@@ -327,6 +328,8 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         let clip = m.addItem(withTitle: "Share clipboard with phone", action: #selector(toggleClip), keyEquivalent: "")
         clip.state = syncClipboard ? .on : .off
         m.addItem(withTitle: "Copy pairing command", action: #selector(copyPair), keyEquivalent: "")
+        let diag = m.addItem(withTitle: "Phone Diagnostics", action: #selector(askDiag), keyEquivalent: "")
+        diag.isEnabled = conn != nil
         m.addItem(.separator())
         m.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         m.items.forEach { if $0.action != #selector(NSApplication.terminate(_:)) { $0.target = self } }
@@ -425,6 +428,8 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         a.addButton(withTitle: "Call"); a.addButton(withTitle: "Cancel")
         if a.runModal() == .alertFirstButtonReturn { log("dial sent"); send(["t": "dial", "number": number]) }
     }
+
+    @objc func askDiag() { log("diagnostics requested"); send(["t": "diag"]) }
 
     @objc func askNumber() {
         NSApp.activate(ignoringOtherApps: true)
@@ -539,7 +544,14 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
                 "For one-click calling, open Kitbridge on your phone and tap Allow next to \"Call from your Mac\".") }
             if how == "error" { notice("Couldn't start the call", "Check that Kitbridge is running on your phone.") }
         case "hello":
-            phone = j["name"] as? String ?? "Phone"; refresh()
+            phone = j["name"] as? String ?? "Phone"; phoneVersion = j["version"] as? String ?? "older than 1.4"
+            log("phone hello: \(phone), Kitbridge \(phoneVersion)"); refresh()
+        case "diag":
+            let f = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Kitbridge-phone.log")
+            let state = (j["state"] as? [String: Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys, .prettyPrinted]) }
+            let text = "Phone diagnostics \(Date())\n" + (state.map { String(decoding: $0, as: UTF8.self) } ?? "") + "\n\n" + (j["log"] as? String ?? "")
+            try? text.write(to: f, atomically: true, encoding: .utf8)
+            log("phone diagnostics saved to Kitbridge-phone.log")
         case "notif":
             guard let id = j["id"] as? String else { return }
             log("notification received from phone: \(j["app"] as? String ?? "?")")

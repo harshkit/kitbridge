@@ -117,6 +117,23 @@ object Link {
 
     const val PORT = 47811
 
+    /** "Phone Diagnostics" from the Mac menu: Kitbridge's own log lines plus permission states. Never other apps' logs. */
+    private fun diagnostics(): JSONObject {
+        val lines = runCatching {
+            Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "400", "-s", "Kitbridge:V")).inputStream.bufferedReader().readText()
+        }.getOrDefault("(logcat unavailable)").takeLast(60_000)
+        fun has(p: String) = ctx.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
+        val perms = JSONObject()
+            .put("version", runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull())
+            .put("android", Build.VERSION.RELEASE)
+            .put("CALL_PHONE", has(Manifest.permission.CALL_PHONE)).put("READ_LOGS", has(Manifest.permission.READ_LOGS))
+            .put("RECEIVE_SMS", has(Manifest.permission.RECEIVE_SMS)).put("POST_NOTIFICATIONS", has(Manifest.permission.POST_NOTIFICATIONS))
+            .put("overlay", Settings.canDrawOverlays(ctx))
+            .put("batteryUnrestricted", ctx.getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName))
+            .put("clipWatcherSees", ClipWatch.healthy)
+        return JSONObject().put("t", "diag").put("state", perms).put("log", lines)
+    }
+
     /** The name you gave the phone (Settings → About phone), e.g. "Harsh's S26 Ultra"; else the model. */
     private fun deviceName() = Settings.Global.getString(ctx.contentResolver, "device_name")?.takeIf { it.isNotBlank() } ?: Build.MODEL
 
@@ -288,7 +305,8 @@ object Link {
             var rx = 0L
 
             sendQ.submit { tx = 0; session = SecretKeySpec(sk, "AES"); out = o }.get()
-            send(JSONObject().put("t", "hello").put("name", deviceName()))
+            send(JSONObject().put("t", "hello").put("name", deviceName())
+                .put("version", runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?"))
             sendBattery(force = true)
             thread { BridgeService.instance?.resync() } // catch up on anything posted while disconnected
             prefs.edit().putString("host", host).putInt("port", port).apply()
@@ -344,7 +362,9 @@ object Link {
                 send(JSONObject().put("t", "callacted").put("id", j.getString("id")).put("act", j.getString("act")).put("ok", ok))
                 return
             }
+            "diag" -> { thread { send(diagnostics()) }; return }
             "dial" -> {
+                android.util.Log.i("Kitbridge", "Dial request received")
                 val r = Calls.dial(ctx, j.getString("number"))
                 send(JSONObject().put("t", "dialed").put("ok", r != "error").put("how", r)); return
             }
