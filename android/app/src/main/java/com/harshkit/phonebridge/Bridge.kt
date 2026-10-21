@@ -797,7 +797,9 @@ object Calls {
         val num = number.trim()
         if (!num.matches(Regex("""[0-9+*#() .\-]{3,32}"""))) return false
         val granted = c.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
-        val i = Intent(if (granted) Intent.ACTION_CALL else Intent.ACTION_DIAL, Uri.fromParts("tel", num, null))
+        // * or # make it a USSD/MMI code (call forwarding, settings): never auto-dial those, only open the dialer.
+        val code = num.contains('*') || num.contains('#')
+        val i = Intent(if (granted && !code) Intent.ACTION_CALL else Intent.ACTION_DIAL, Uri.fromParts("tel", num, null))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return runCatching { c.startActivity(i); android.util.Log.i("Kitbridge", "Dialing from Mac"); true }.getOrDefault(false)
     }

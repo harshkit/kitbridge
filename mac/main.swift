@@ -411,8 +411,12 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
 
     /// Dial on the phone, always after you confirm on the Mac (phone links can come from any app or web page).
     func confirmDial(_ raw: String) {
-        let number = raw.replacingOccurrences(of: "tel:", with: "").removingPercentEncoding ?? raw
-        guard number.range(of: #"^[0-9+*#() .\-]{3,32}$"#, options: .regularExpression) != nil else { return }
+        // Only plain phone numbers: no * or #, which would make a link a USSD/MMI code (e.g. call forwarding).
+        var number = raw.hasPrefix("tel:") ? String(raw.dropFirst(4)) : raw
+        number = (number.removingPercentEncoding ?? number).components(separatedBy: CharacterSet(charactersIn: ";?")).first ?? ""
+        guard number.range(of: #"^\+?[0-9 ().\-]{3,32}$"#, options: .regularExpression) != nil else {
+            return notice("That link isn't a phone number", "Kitbridge only calls plain numbers, not codes with * or #.")
+        }
         guard conn != nil else { return notice("Your phone isn't connected", "Kitbridge needs your phone on the same Wi-Fi.") }
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
@@ -430,7 +434,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         a.window.initialFirstResponder = f
         if a.runModal() == .alertFirstButtonReturn, !f.stringValue.isEmpty {
             let n = f.stringValue.trimmingCharacters(in: .whitespaces)
-            if n.range(of: #"^[0-9+*#() .\-]{3,32}$"#, options: .regularExpression) != nil, conn != nil { send(["t": "dial", "number": n]) }
+            if n.range(of: #"^\+?[0-9 ().\-]{3,32}$"#, options: .regularExpression) != nil, conn != nil { send(["t": "dial", "number": n]) }
         }
     }
 
