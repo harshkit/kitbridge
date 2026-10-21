@@ -38,7 +38,9 @@ It installs the Mac app (menu bar, starts at login), then pairs your phone over 
 
 ## Features
 
-- 📞 **Calls on your Mac.** Incoming calls appear as time-sensitive Mac alerts, showing the caller the way your phone does.
+- 📞 **Calls on your Mac.** An iPhone-style call panel appears on the Mac with the caller's photo or initials: **Accept**, **Decline**, and during the call a live timer and **End**. Outgoing calls show **Calling…** until answered. Works with your phone's own calls (including Samsung's dialer) and WhatsApp calls. The call audio stays on your phone or its earbuds; macOS doesn't let other phones use the Mac's microphone and speakers for calls.
+- ☎️ **Call from your Mac.** **Call a Number…** in the menu bar, or click any phone number on the Mac once Kitbridge handles phone links. You always confirm first, and your phone places the call.
+- 🔋 **Your phone in the menu bar.** The Kitbridge menu shows your phone like a connected device: its name, battery level and charging.
 - 💬 **Messages and SMS.** WhatsApp, Messages, Telegram and everything else your phone shows, as native macOS notifications with the sender's photo and the app's badge. Swipe one away on the phone and it disappears from the Mac.
 - ↩️ **Reply from your Mac.** Hover a WhatsApp, SMS or Telegram alert, click **Reply**, type, send. The phone answers through the app's own reply button, so it's a real reply in the chat.
 - 🔐 **OTP auto-copy.** When a verification code arrives, it's already on your Mac's clipboard: just press **⌘V**. Works with bank SMS, Google, and "123 456"-style codes; ignores amounts like "₹1500".
@@ -74,7 +76,7 @@ Android deliberately makes a few of these things hard for apps. Here's what Kitb
 | Log access is granted only on screen (Android 13+) | After a reboot or update, Kitbridge shows a "Turn on copy to Mac" reminder; tap it, then Allow. The Send to Mac tile and share option never need it. |
 | HDR photos look washed out on a Mac clipboard | The Mac converts them with Apple's ImageIO to a standard-range PNG (keeping the colour profile and rotation) and also keeps the original. |
 
-**Permissions the Android app uses:** notification access, RECEIVE_SMS, READ_LOGS (fallback copy detection, granted over adb), SYSTEM_ALERT_WINDOW (lets the invisible clipboard reader open from the background), POST_NOTIFICATIONS (the setup reminder), QUERY_ALL_PACKAGES (to show app names on the Mac), INTERNET and Wi-Fi state (local network only).
+**Permissions the Android app uses:** notification access, RECEIVE_SMS, CALL_PHONE and ANSWER_PHONE_CALLS (place, answer, decline and end calls you trigger from the Mac), READ_PHONE_STATE (to tell when a call is ringing), READ_LOGS (fallback copy detection, granted over adb), SYSTEM_ALERT_WINDOW (lets the invisible clipboard reader open from the background), POST_NOTIFICATIONS (the setup reminder), QUERY_ALL_PACKAGES (to show app names on the Mac), INTERNET and Wi-Fi state (local network only).
 
 **Payment and banking apps keep working.** Kitbridge uses no Accessibility service, which is what UPI and banking apps (GPay, PhonePe, Paytm, banks) block. Some banking apps also refuse to open while Developer options or Wireless debugging is on: after setup you can switch Wireless debugging off; Kitbridge doesn't need it day to day.
 

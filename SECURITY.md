@@ -28,6 +28,10 @@ Only someone holding the pairing key can complete the handshake. The pairing key
 
 **Finding the Mac.** The phone sends a 20-byte UDP message on port 47811: `KB?1` plus a random 16-byte challenge. The Mac answers `KB!1` plus the first 16 bytes of HMAC-SHA256(pairing key, "kb-discover" + challenge). The phone accepts only an answer that proves the pairing key, so nobody else on the Wi-Fi can redirect it. The encrypted handshake still decides whether anything is trusted. There is no amplification: the answer is the same size as the question.
 
+**Calls.** Only the paired Mac (over the encrypted link) can ask the phone to answer, decline, end or place a call. The Mac asks you to confirm every number before dialling, including numbers from links, and accepts only plain numbers: anything with `*` or `#` (USSD/MMI codes such as call forwarding) is refused on the Mac, and on the phone such a code is never dialled automatically, only offered in the dialer.
+
+**Diagnostics.** "Phone Diagnostics" in the Mac menu asks the phone for Kitbridge's own log lines and its permission states, nothing from other apps, and saves them to `~/Library/Logs/Kitbridge-phone.log` on your Mac.
+
 ## What Kitbridge does not protect against
 
 - **Someone with your unlocked Mac or phone.** The pairing key is stored in the Mac user's Application Support folder and in the app's private storage on Android.
