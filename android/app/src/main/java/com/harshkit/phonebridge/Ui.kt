@@ -371,12 +371,14 @@ class MainActivity : KitActivity() {
         perms.removeAllViews()
         val listener = Settings.Secure.getString(contentResolver, "enabled_notification_listeners").orEmpty().contains(packageName)
         val sms = SmsReceiver.granted(this)
-        if (listener && sms) return
+        val dialer = checkSelfPermission(Manifest.permission.CALL_PHONE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (listener && sms && dialer) return
         perms.addView(text("Setup", 22f, Color.WHITE, BOLD), lp(bottom = 8))
         val g = card().apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, 0) }
         val items = listOfNotNull(
             if (!listener) Triple("Notification access", ORANGE, { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) else null,
             if (!sms) Triple("Full SMS text for OTPs", 0xFF34C759.toInt(), { requestPermissions(arrayOf(Manifest.permission.RECEIVE_SMS), 1) }) else null,
+            if (!dialer) Triple("Call from your Mac", 0xFF34C759.toInt(), { requestPermissions(arrayOf(Manifest.permission.CALL_PHONE), 2) }) else null,
         )
         items.forEachIndexed { i, (label, c, go) ->
             g.addView(row(label, c, android.R.drawable.ic_dialog_alert, last = i == items.lastIndex) { r ->
