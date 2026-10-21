@@ -423,7 +423,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         a.messageText = "Call \(number)?"
         a.informativeText = "Your phone (\(phone)) will place the call. Use your phone or its earbuds to talk."
         a.addButton(withTitle: "Call"); a.addButton(withTitle: "Cancel")
-        if a.runModal() == .alertFirstButtonReturn { send(["t": "dial", "number": number]) }
+        if a.runModal() == .alertFirstButtonReturn { log("dial sent"); send(["t": "dial", "number": number]) }
     }
 
     @objc func askNumber() {
@@ -434,7 +434,7 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         a.window.initialFirstResponder = f
         if a.runModal() == .alertFirstButtonReturn, !f.stringValue.isEmpty {
             let n = f.stringValue.trimmingCharacters(in: .whitespaces)
-            if n.range(of: #"^\+?[0-9 ().\-]{3,32}$"#, options: .regularExpression) != nil, conn != nil { send(["t": "dial", "number": n]) }
+            if n.range(of: #"^\+?[0-9 ().\-]{3,32}$"#, options: .regularExpression) != nil, conn != nil { log("dial sent"); send(["t": "dial", "number": n]) }
         }
     }
 
@@ -533,7 +533,11 @@ final class Bridge: NSObject, NSApplicationDelegate, UNUserNotificationCenterDel
         case "callacted":
             if j["ok"] as? Bool != true, (j["id"] as? String) == call.id { call.pending = "Couldn't reach the phone's call buttons" }
         case "dialed":
-            if j["ok"] as? Bool != true { notice("Couldn't start the call", "Check that Kitbridge is set up on your phone.") }
+            let how = j["how"] as? String ?? (j["ok"] as? Bool == true ? "placed" : "error")
+            log("dial result: \(how)")
+            if how == "notified" { notice("Tap the notification on your phone to call",
+                "For one-click calling, open Kitbridge on your phone and tap Allow next to \"Call from your Mac\".") }
+            if how == "error" { notice("Couldn't start the call", "Check that Kitbridge is running on your phone.") }
         case "hello":
             phone = j["name"] as? String ?? "Phone"; refresh()
         case "notif":

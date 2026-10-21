@@ -344,7 +344,10 @@ object Link {
                 send(JSONObject().put("t", "callacted").put("id", j.getString("id")).put("act", j.getString("act")).put("ok", ok))
                 return
             }
-            "dial" -> { send(JSONObject().put("t", "dialed").put("ok", Calls.dial(ctx, j.getString("number")))); return }
+            "dial" -> {
+                val r = Calls.dial(ctx, j.getString("number"))
+                send(JSONObject().put("t", "dialed").put("ok", r != "error").put("how", r)); return
+            }
             "reply" -> {
                 val ok = Replies.send(ctx, j.getString("id"), j.getString("text"))
                 send(JSONObject().put("t", "replied").put("id", j.getString("id")).put("ok", ok))
@@ -792,16 +795,32 @@ object Calls {
         return runCatching { pi.send(); android.util.Log.i("Kitbridge", "Call $what pressed"); true }.getOrDefault(false)
     }
 
-    /** "Call from Mac": dial on the phone. Needs CALL_PHONE (granted by setup); otherwise opens the dialer filled in. */
-    fun dial(c: Context, number: String): Boolean {
+    /**
+     * "Call from Mac". With CALL_PHONE, Telecom places the call directly (no screen to open, so Android's
+     * background-launch limits don't apply). Without it, or for * / # codes (USSD), a notification on the
+     * phone offers "tap to dial", since opening the dialer from the background is blocked on recent Android.
+     * Returns what happened: "placed", "notified" or "error".
+     */
+    fun dial(c: Context, number: String): String {
         val num = number.trim()
-        if (!num.matches(Regex("""[0-9+*#() .\-]{3,32}"""))) return false
-        val granted = c.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
-        // * or # make it a USSD/MMI code (call forwarding, settings): never auto-dial those, only open the dialer.
+        if (!num.matches(Regex("""[0-9+*#() .\-]{3,32}"""))) return "error"
         val code = num.contains('*') || num.contains('#')
-        val i = Intent(if (granted && !code) Intent.ACTION_CALL else Intent.ACTION_DIAL, Uri.fromParts("tel", num, null))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return runCatching { c.startActivity(i); android.util.Log.i("Kitbridge", "Dialing from Mac"); true }.getOrDefault(false)
+        val uri = Uri.fromParts("tel", num, null)
+        val granted = c.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+        if (granted && !code) runCatching {
+            c.getSystemService(android.telecom.TelecomManager::class.java).placeCall(uri, Bundle())
+            android.util.Log.i("Kitbridge", "Call placed from Mac"); return "placed"
+        }.onFailure { android.util.Log.w("Kitbridge", "placeCall failed: ${it.javaClass.simpleName}") }
+        return runCatching {
+            val nm = c.getSystemService(android.app.NotificationManager::class.java)
+            nm.createNotificationChannel(android.app.NotificationChannel("dial", "Calls from Mac", android.app.NotificationManager.IMPORTANCE_HIGH))
+            val tap = android.app.PendingIntent.getActivity(c, 0, Intent(Intent.ACTION_DIAL, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+            nm.notify(8, Notification.Builder(c, "dial").setSmallIcon(android.R.drawable.sym_action_call)
+                .setContentTitle("Call $num").setContentText("Tap to dial (sent from your Mac)")
+                .setContentIntent(tap).setAutoCancel(true).build())
+            android.util.Log.i("Kitbridge", "Dial offered as notification"); "notified"
+        }.getOrDefault("error")
     }
 }
 
